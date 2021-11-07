@@ -1,58 +1,17 @@
-#!/usr/bin/env python
-import math
 import struct
-import subprocess
 
+import libdispatch
 import Foundation
+import objc
 import PyObjCTools.AppHelper
-
-import solver
-import render
-
-def quat_mul(q1, q2):
-    [a, b, c, d] = q1
-    [w, x, y, z] = q2
-    return [a*w - b*x - c*y - d*z,
-        a*x + b*w + c*d - d*y,
-        a*y - b*z + c*w + d*x,
-        a*z + b*y - c*x + d*w]
-
-def quat_invert(values):
-    [w, x, y, z] = values
-    f = 1 / (w*w + x*x + y*y + z*z)
-    return [w * f, -x * f, -y * f, -z * f]
-
-def quat_normalize(values):
-    [w, x, y, z] = values
-    f = 1 / (w*w + x*x + y*y + z*z) ** .5
-    return [w * f, x * f, y * f, z * f]
-
-def quat_matrix(values):
-    [w, x, y, z] = values
-    return [
-        w*w + x*x - y*y - z*z, 2*x*y - 2*w*z, 2*x*z + 2*w*y, 0,
-        2*x*y + 2*w*z, w*w - x*x + y*y - z*z, 2*y*z - 2*w*x, 0,
-        2*x*z - 2*w*y, 2*y*z + 2*w*x, w*w - x*x - y*y + z*z, 0,
-        0, 0, 0, 1,
-    ]
 
 # Shortcut for UUIDs
 U = Foundation.CBUUID.UUIDWithString_
 
-# ObjC class to handle bluetooth messages and convert them into a normal cube
-class WeilongAIHandler:
-    def __init__(self):
-        self.angle_base = [1, 0, 0, 0]
-        self.reset()
-        self.render()
-
-    def reset(self):
-        self.state = [0] * 6
-        self.turns = [0] * 6
-        self.cube = solver.Cube()
-
-    def render(self):
-        return render.render(self.cube, self.turns)
+# ObjC class to connect to a bluetooth cube and parse messages
+class WeilongAIDelegate:
+    def __init__(self, handler):
+        self.handler = handler
 
     def centralManagerDidUpdateState_(self, manager):
         self.manager = manager
@@ -114,53 +73,29 @@ class WeilongAIHandler:
                 turn = packet[5]
                 turn = {220: -1, 36: 1}[turn]
 
-                # Add up partial turn info. Since the start/end message stuff
-                # is a bit weird and either unreliable or not understood (or
-                # both), use a counter to determine when a turn starts/ends
-                self.turns[face] += turn
-
-                # 9 incremental turns make a full quarter turn
-                if abs(self.turns[face]) >= 9:
-                    alg = 'ULFRBD'[face] + ["'", '', ''][turn + 1]
-                    alg = solver.parse_alg(alg)
-                    self.cube.run_alg(alg)
-
-                    # Zero out everything but the opposite face as a sanity
-                    # check. Use a threshold so that a partial turn doesn't
-                    # mess up later turn accounting (if the turning is choppy,
-                    # say, one turn might start before the last completes)
-                    opp = [5, 3, 4, 1, 2, 0][face]
-                    for f in range(6):
-                        if f != opp and abs(self.turns[f]) > 4:
-                            self.turns[f] = 0
+                self.handler.turn_face(face, turn)
 
         # Gyroscope rotation messages
         elif char == '1004':
             [_, *values] = struct.unpack('<Iffff', value)
             # Fix up quaternion values. Not totally sure why this is necessary:
-            # the rotations
             [w, x, y, z] = values
-            values = [w, x, z, -y]
+            quat = [w, x, z, -y]
 
-            # Convert quaternions to rotation matrix and rotate
-            v = quat_mul(self.angle_base, values)
-            matrix = quat_matrix(quat_normalize(v))
-            render.reset()
-            render.glMultTransposeMatrixf(matrix)
+            self.handler.update_rotation(quat)
 
-            # If the user has reset, save the rotation to recalibrate
-            if self.render():
-                self.reset()
-                self.angle_base = quat_invert(values)
-
-
-if __name__ == '__main__':
-    render.setup()
-
-    import objc
+def init_bluetooth(handler):
     objc.setVerbose(1)
 
-    manager = Foundation.CBCentralManager.alloc()
-    manager.initWithDelegate_queue_options_(WeilongAIHandler(), None, None)
+    # Get the global dispatch queue. By default events get dispatched to
+    # the main thread, which is weird and irritating in our case when we
+    # try to have the render thread wait for events
+    queue = libdispatch.dispatch_get_global_queue(
+            libdispatch.DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
 
-    PyObjCTools.AppHelper.runConsoleEventLoop()
+    manager = Foundation.CBCentralManager.alloc()
+    manager.initWithDelegate_queue_options_(WeilongAIDelegate(handler),
+            queue, None)
+
+    # Return manager so main thread can keep a reference to it
+    return manager

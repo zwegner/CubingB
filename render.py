@@ -125,6 +125,7 @@ def reset():
     glRotatef(0, 0, 0, 0)
 
 def render(cube, turns):
+    glClearColor(.3, .3, .3, 1)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
     # Render cube
@@ -171,15 +172,5 @@ def render(cube, turns):
     glMatrixMode(GL_PROJECTION)
 
     pygame.display.flip() 
-
-    # Read events
-    reset = False
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            quit()
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-            reset = True
-    return reset
 
 gen_verts()
