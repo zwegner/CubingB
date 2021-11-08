@@ -1,12 +1,7 @@
-import pygame 
 from OpenGL.GL import *
 from OpenGL.GLU import *
-from pygame.locals import *
 
 import solver
-
-#WINDOW_SIZE = [2560, 1440]
-WINDOW_SIZE = [1600, 1000]
 
 # UDRLFB, WYROGB
 COLORS = [
@@ -38,6 +33,8 @@ AXES = [
     [0, 0, -1],
     [0, 0, 1],
 ]
+
+FONT = None
 
 def gen_verts():
     # Vertex tables for a single cubie
@@ -103,12 +100,7 @@ def gen_verts():
                         break
 
 # Set up window and some rendering state
-def setup():
-    pygame.init()
-    mode = OPENGL | DOUBLEBUF 
-    if 0:
-        mode |= FULLSCREEN
-    pygame.display.set_mode(WINDOW_SIZE, mode)
+def setup(window_size):
     glDepthFunc(GL_LEQUAL)
     glEnable(GL_DEPTH_TEST)
     glEnable(GL_POLYGON_SMOOTH)
@@ -116,7 +108,7 @@ def setup():
 
     # Set up view
     glMatrixMode(GL_PROJECTION)
-    gluPerspective(40, (WINDOW_SIZE[0] / WINDOW_SIZE[1]), 0.1, 50.0)
+    gluPerspective(40, (window_size[0] / window_size[1]), 0.1, 50.0)
     glTranslatef(0, 0, -4)
 
     # Push current view state and move to model mode
@@ -133,7 +125,6 @@ def set_rotation(matrix):
 
 def render_cube(cube, turns):
     # Render cube
-
     dumb_centers = [[c] for c in cube.centers]
 
     # Render edges/corners/centers
@@ -170,9 +161,5 @@ def render_cube(cube, turns):
             glEnd()
 
             glPopMatrix()
-
-
-def flip():
-    pygame.display.flip() 
 
 gen_verts()

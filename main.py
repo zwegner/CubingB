@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 import copy
 import enum
-import math
 import random
-import threading
-import time
+import sys
 
-import pygame
+from PyQt5.QtCore import QSize
+from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget, QOpenGLWidget
 
 import bluetooth
 import render
 import solver
+
+WINDOW_SIZE = [1600, 1000]
 
 def quat_mul(q1, q2):
     [a, b, c, d] = q1
@@ -43,8 +44,8 @@ State = enum.Enum('State', 'SCRAMBLING SCRAMBLED SOLVING SOLVED')
 
 # Class to receive parsed bluetooth messages and turn that into regular cube logic
 class CubeHandler:
-    def __init__(self):
-        self.change_lock = threading.Condition()
+    def __init__(self, gl_widget):
+        self.gl_widget = gl_widget
         self.quat = [1, 0, 0, 0]
         self.base_quat = self.quat
         self.matrix = quat_matrix(self.quat)
@@ -69,109 +70,116 @@ class CubeHandler:
         self.scramble_left = self.scramble[:]
         print(' '.join(self.scramble))
 
-    def main_loop(self):
-        # Capture the return value just so it doesn't get GC'd and stop listening
-        self.bt = bluetooth.init_bluetooth(handler)
-
-        render.setup()
-
-        while True:
-            self.render()
-            self.read_events()
-
-    def render(self):
-        with self.change_lock:
-            self.change_lock.wait(timeout=.5)
-            cube = copy.deepcopy(self.cube)
-            turns = self.turns[:]
-            matrix = self.matrix[:]
-            scramble = self.scramble_left[:]
-
-        render.reset()
-        render.set_rotation(matrix)
-        render.render_cube(cube, turns)
-        render.flip()
-
-    def read_events(self):
-        with self.change_lock:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    quit()
-                # Space: calibrate rotation
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                    self.base_quat = quat_invert(self.quat)
-                # Enter: reset cube state
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                    self.reset()
+        self.gl_widget.render_data = [self.cube, self.turns, self.matrix]
 
     def reset(self):
-        with self.change_lock:
-            self.cube = solver.Cube()
-            self.turns = [0] * 6
+        self.cube = solver.Cube()
+        self.turns = [0] * 6
 
-    # Set an asynchronous event so the render thread knows something's changed
+    # Notify the cube widget that we've updated. We copy all the rendering
+    # data to a new object so it can pick up a consistent view at its leisure
     def mark_changed(self):
-        with self.change_lock:
-            self.change_lock.notify_all()
+        cube = copy.deepcopy(self.cube)
+        turns = self.turns[:]
+        matrix = self.matrix[:]
+        scramble = self.scramble_left[:]
+
+        self.gl_widget.render_data = [cube, turns, matrix]
+        self.gl_widget.update()
 
     # Make a move and update any state for either a scramble or a solve
     def make_turn(self, face, turn):
-        with self.change_lock:
-            face = solver.FACE_STR[face]
-            alg = face + solver.TURN_STR[turn]
-            self.cube.run_alg(alg)
-            # See if this is the next move of the scramble
-            if self.state == State.SCRAMBLING:
-                s_face = self.scramble_left[0][0]
-                s_turn = solver.INV_TURN_STR[self.scramble_left[0][1:]]
-                if face == s_face:
-                    s_turn = (s_turn - turn) % 4
-                    if not s_turn:
-                        self.scramble_left.pop(0)
-                        if not self.scramble_left:
-                            print("DONE")
-                            self.state = State.SCRAMBLED
-                    else:
-                        new_turn = solver.TURN_STR[s_turn]
-                        self.scramble_left[0] = face + new_turn
+        face = solver.FACE_STR[face]
+        alg = face + solver.TURN_STR[turn]
+        self.cube.run_alg(alg)
+        # See if this is the next move of the scramble
+        if self.state == State.SCRAMBLING:
+            s_face = self.scramble_left[0][0]
+            s_turn = solver.INV_TURN_STR[self.scramble_left[0][1:]]
+            if face == s_face:
+                s_turn = (s_turn - turn) % 4
+                if not s_turn:
+                    self.scramble_left.pop(0)
+                    if not self.scramble_left:
+                        print("DONE")
+                        self.state = State.SCRAMBLED
                 else:
-                    new_turn = solver.TURN_STR[-turn % 4]
-                    self.scramble_left.insert(0, face + new_turn)
-                print(' '.join(self.scramble_left))
+                    new_turn = solver.TURN_STR[s_turn]
+                    self.scramble_left[0] = face + new_turn
             else:
-                pass
+                new_turn = solver.TURN_STR[-turn % 4]
+                self.scramble_left.insert(0, face + new_turn)
+            print(' '.join(self.scramble_left))
+        else:
+            pass
 
     # XXX for now we use weilong units, 1/36th turns
     def update_turn(self, face, turn):
-        with self.change_lock:
-            # Add up partial turns
-            self.turns[face] += turn
+        # Add up partial turns
+        self.turns[face] += turn
 
-            # 9 incremental turns make a full quarter turn
-            if abs(self.turns[face]) >= 9:
-                turn = self.turns[face] // 9
-                self.make_turn(face, turn)
+        # 9 incremental turns make a full quarter turn
+        if abs(self.turns[face]) >= 9:
+            turn = self.turns[face] // 9
+            self.make_turn(face, turn)
 
-                # Zero out everything but the opposite face as a sanity
-                # check. Use a threshold so that a partial turn doesn't
-                # mess up later turn accounting (if the turning is choppy,
-                # say, one turn might start before the last completes)
-                opp = face ^ 1
-                for f in range(6):
-                    if f != opp and abs(self.turns[f]) > 4:
-                        self.turns[f] = 0
+            # Zero out everything but the opposite face as a sanity
+            # check. Use a threshold so that a partial turn doesn't
+            # mess up later turn accounting (if the turning is choppy,
+            # say, one turn might start before the last completes)
+            opp = face ^ 1
+            for f in range(6):
+                if f != opp and abs(self.turns[f]) > 4:
+                    self.turns[f] = 0
 
-            self.mark_changed()
+        self.mark_changed()
 
     def update_rotation(self, quat):
-        with self.change_lock:
-            self.quat = quat
-            q = quat_mul(self.base_quat, quat)
-            self.matrix = quat_matrix(quat_normalize(q))
+        self.quat = quat
+        q = quat_mul(self.base_quat, quat)
+        self.matrix = quat_matrix(quat_normalize(q))
 
-            self.mark_changed()
+        self.mark_changed()
+
+################################################################################
+## Qt interface stuff ##########################################################
+################################################################################
+
+class Window(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        # Set up renderin widget
+        self.gl_widget = GLWidget()
+
+        # Set up cube handler
+        self.handler = CubeHandler(self.gl_widget)
+
+        # Initialize bluetooth
+        # Capture the return value just so it doesn't get GC'd and stop listening
+        self.bt = bluetooth.init_bluetooth(self.handler)
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.gl_widget)
+        self.setLayout(layout)
+        self.setWindowTitle('CubingB')
+
+class GLWidget(QOpenGLWidget):
+    def sizeHint(self):
+        return QSize(*WINDOW_SIZE)
+
+    def initializeGL(self):
+        render.setup(WINDOW_SIZE)
+
+    def paintGL(self):
+        render.reset()
+        [cube, turns, matrix] = self.render_data
+        render.set_rotation(matrix)
+        render.render_cube(cube, turns)
+        #render.render_scramble(scramble)
 
 if __name__ == '__main__':
-    handler = CubeHandler()
-    handler.main_loop()
+    app = QApplication(sys.argv)
+    window = Window()
+    window.show()
+    sys.exit(app.exec_())
