@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QWidget,
         QOpenGLWidget, QLabel)
 
 import bluetooth
+import db
 import render
 import solver
 
@@ -60,6 +61,12 @@ class CubeWindow(QMainWindow):
         self.timer_widget = None
         self.gen_scramble()
 
+        db.init_db('sqlite:///cubingb.db')
+        # Create a session and set it as current
+        with db.get_session() as session:
+            sesh = session.upsert(db.CubeSession, {'name': '3x3'})
+            session.upsert(db.Settings, {}, current_session=sesh)
+
         self.update_state_ui()
 
         # Initialize bluetooth
@@ -85,7 +92,7 @@ class CubeWindow(QMainWindow):
             self.update_state_ui()
 
     def update_timer(self):
-        self.timer_widget.update_time(time.time() - self.start_time)
+        self.timer_widget.update_time(time.time() - self.start_time, 1)
 
     # Change UI modes based on state
     def update_state_ui(self):
@@ -117,13 +124,13 @@ class CubeWindow(QMainWindow):
             self.layout.addWidget(self.timer_widget)
             self.timer = QTimer()
             self.timer.timeout.connect(self.update_timer)
-            self.timer.start(10)
+            self.timer.start(100)
         elif self.state == State.SOLVED:
             self.instruction_widget = InstructionWidget(self)
             self.timer.stop()
             self.timer = None
             self.timer_widget = TimerWidget(self)
-            self.timer_widget.update_time(self.end_time - self.start_time)
+            self.timer_widget.update_time(self.final_time, 3)
             self.instruction_widget.setText("That was pretty cool.")
             self.layout.addWidget(self.instruction_widget)
             self.layout.addWidget(self.timer_widget)
@@ -138,6 +145,7 @@ class CubeWindow(QMainWindow):
         self.solve_moves = []
         self.start_time = None
         self.end_time = None
+        self.final_time = None
 
         last_face = None
         turns = list(solver.TURN_STR.values())
@@ -204,10 +212,17 @@ class CubeWindow(QMainWindow):
             if self.check_solved():
                 self.state = State.SOLVED
                 self.end_time = time.time()
+                self.final_time = self.end_time - self.start_time
+                # Update database
+                with db.get_session() as session:
+                    sesh = session.query_first(db.Settings).current_session
+                    session.insert(db.Solve, session=sesh,
+                            scramble=' '.join(self.scramble),
+                            time_ms=int(self.final_time * 1000))
+
         # XXX handle after-solve-but-pre-scramble moves
 
         if self.state != old_state:
-            #self.update_state_ui()
             self.update_signal.emit()
 
     # XXX for now we use weilong units, 1/36th turns
@@ -241,8 +256,10 @@ class TimerWidget(QLabel):
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-    def update_time(self, t):
-        self.setText('%.02f' % t)
+    def update_time(self, t, prec):
+        # Set up a format string since there's no .*f formatting
+        fmt = '%%.0%sf' % prec
+        self.setText(fmt % t)
         self.update()
 
 class InstructionWidget(QLabel):

@@ -1,3 +1,4 @@
-pyobjc==7.3
-PyOpenGL==3.1.5
+pyobjc
+PyOpenGL
 PyQt5
+sqlalchemy
