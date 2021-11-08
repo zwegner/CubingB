@@ -3,10 +3,11 @@ import copy
 import enum
 import random
 import sys
+import time
 
-from PyQt5.QtCore import QSize, Qt
-from PyQt5.QtWidgets import (QApplication, QVBoxLayout, QWidget, QOpenGLWidget,
-        QLabel)
+from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QWidget,
+        QOpenGLWidget, QLabel)
 
 import bluetooth
 import render
@@ -43,13 +44,92 @@ def quat_matrix(values):
 
 State = enum.Enum('State', 'SCRAMBLING SCRAMBLED SOLVING SOLVED')
 
-# Class to receive parsed bluetooth messages and turn that into regular cube logic
-class CubeHandler:
-    def __init__(self, gl_widget, scramble_widget):
-        self.gl_widget = gl_widget
-        self.scramble_widget = scramble_widget
-        self.quat = [1, 0, 0, 0]
+SOLVED_CUBE = solver.Cube()
+
+# Giant main class that handles the main window, receives bluetooth messages,
+# deals with cube logic, etc.
+class CubeWindow(QMainWindow):
+    update_signal = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.timer = None
+        self.gl_widget = None
+        self.scramble_widget = None
+        self.instruction_widget = None
+        self.timer_widget = None
         self.gen_scramble()
+
+        self.update_state_ui()
+
+        # Initialize bluetooth
+        # Capture the return value just so it doesn't get GC'd and stop listening
+        self.bt = bluetooth.init_bluetooth(self)
+
+        self.setWindowTitle('CubingB')
+        self.grabKeyboard()
+
+        # Set up styles
+        self.setStyleSheet('''ScrambleWidget { font: 48px Courier; }
+                InstructionWidget { font: 40px; }
+                TimerWidget { font: 240px Courier; }''')
+
+
+        self.update_signal.connect(self.update_state_ui)
+
+    def keyPressEvent(self, key):
+        if key.key() == Qt.Key.Key_Space:
+            self.gl_widget.base_quat = quat_invert(self.gl_widget.quat)
+        elif key.key() == Qt.Key.Key_Return and self.state == State.SOLVED:
+            self.gen_scramble()
+            self.update_state_ui()
+
+    def update_timer(self):
+        self.timer_widget.update_time(time.time() - self.start_time)
+
+    # Change UI modes based on state
+    def update_state_ui(self):
+        self.widget = QWidget()
+        self.layout = QVBoxLayout()
+
+        self.gl_widget = None
+        self.scramble_widget = None
+        self.instruction_widget = None
+        self.timer_widget = None
+
+        self.gl_widget = GLWidget(self)
+        self.mark_changed()
+
+        if self.state == State.SCRAMBLING:
+            self.scramble_widget = ScrambleWidget(self)
+            self.layout.addWidget(self.scramble_widget)
+            self.layout.addWidget(self.gl_widget)
+        elif self.state == State.SCRAMBLED:
+            self.instruction_widget = InstructionWidget(self)
+            self.instruction_widget.setText("Start solving when you're ready!")
+            self.layout.addWidget(self.instruction_widget)
+            self.layout.addWidget(self.gl_widget)
+        elif self.state == State.SOLVING:
+            self.instruction_widget = InstructionWidget(self)
+            self.timer_widget = TimerWidget(self)
+            self.instruction_widget.setText("")
+            self.layout.addWidget(self.instruction_widget)
+            self.layout.addWidget(self.timer_widget)
+            self.timer = QTimer()
+            self.timer.timeout.connect(self.update_timer)
+            self.timer.start(10)
+        elif self.state == State.SOLVED:
+            self.instruction_widget = InstructionWidget(self)
+            self.timer.stop()
+            self.timer = None
+            self.timer_widget = TimerWidget(self)
+            self.timer_widget.update_time(self.end_time - self.start_time)
+            self.instruction_widget.setText("That was pretty cool.")
+            self.layout.addWidget(self.instruction_widget)
+            self.layout.addWidget(self.timer_widget)
+
+        self.setCentralWidget(self.widget)
+        self.widget.setLayout(self.layout)
 
     def gen_scramble(self):
         self.reset()
@@ -57,6 +137,7 @@ class CubeHandler:
         self.scramble = []
         self.solve_moves = []
         self.start_time = None
+        self.end_time = None
 
         last_face = None
         turns = list(solver.TURN_STR.values())
@@ -71,9 +152,13 @@ class CubeHandler:
 
         self.mark_changed()
 
+    def check_solved(self):
+        return self.cube == SOLVED_CUBE
+
     def reset(self):
         self.cube = solver.Cube()
         self.turns = [0] * 6
+        self.quat = [1, 0, 0, 0]
 
     # Notify the cube widget that we've updated. We copy all the rendering
     # data to a new object so it can pick up a consistent view at its leisure
@@ -83,15 +168,18 @@ class CubeHandler:
         cube = copy.deepcopy(self.cube)
         turns = self.turns[:]
 
-        self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
-        self.gl_widget.set_render_data(cube, turns, self.quat)
+        if self.scramble_widget:
+            self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
+        if self.gl_widget:
+            self.gl_widget.set_render_data(cube, turns, self.quat)
 
     # Make a move and update any state for either a scramble or a solve
     def make_turn(self, face, turn):
         face = solver.FACE_STR[face]
         alg = face + solver.TURN_STR[turn]
         self.cube.run_alg(alg)
-        # See if this is the next move of the scramble
+        old_state = self.state
+        # Scrambling: see if this is the next move of the scramble
         if self.state == State.SCRAMBLING:
             s_face = self.scramble_left[0][0]
             s_turn = solver.INV_TURN_STR[self.scramble_left[0][1:]]
@@ -100,7 +188,6 @@ class CubeHandler:
                 if not s_turn:
                     self.scramble_left.pop(0)
                     if not self.scramble_left:
-                        print("DONE")
                         self.state = State.SCRAMBLED
                 else:
                     new_turn = solver.TURN_STR[s_turn]
@@ -108,9 +195,20 @@ class CubeHandler:
             else:
                 new_turn = solver.TURN_STR[-turn % 4]
                 self.scramble_left.insert(0, face + new_turn)
-            print(' '.join(self.scramble_left))
-        else:
-            pass
+        # Scrambled: begin a solve
+        elif self.state == State.SCRAMBLED:
+            self.state = State.SOLVING
+            self.start_time = time.time()
+        # Solving: check for a complete solve
+        elif self.state == State.SOLVING:
+            if self.check_solved():
+                self.state = State.SOLVED
+                self.end_time = time.time()
+        # XXX handle after-solve-but-pre-scramble moves
+
+        if self.state != old_state:
+            #self.update_state_ui()
+            self.update_signal.emit()
 
     # XXX for now we use weilong units, 1/36th turns
     def update_turn(self, face, turn):
@@ -137,52 +235,35 @@ class CubeHandler:
         self.quat = quat
         self.mark_changed()
 
-################################################################################
-## Qt interface stuff ##########################################################
-################################################################################
+class TimerWidget(QLabel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        # This shit should really be in the stylesheet, but not supported?!
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-class Window(QWidget):
-    def __init__(self):
-        super().__init__()
+    def update_time(self, t):
+        self.setText('%.02f' % t)
+        self.update()
 
-        # Set up UI widgets
-        self.gl_widget = GLWidget()
-        self.scramble_widget = ScrambleWidget()
-
-        # Set up cube handler
-        self.handler = CubeHandler(self.gl_widget, self.scramble_widget)
-
-        # Initialize bluetooth
-        # Capture the return value just so it doesn't get GC'd and stop listening
-        self.bt = bluetooth.init_bluetooth(self.handler)
-
-        self.grabKeyboard()
-
-        # Set up styles
-        self.setStyleSheet('ScrambleWidget { font: 48px Courier; }')
-
-        # Build layout
-        layout = QVBoxLayout()
-        layout.addWidget(self.scramble_widget)
-        layout.addWidget(self.gl_widget)
-        self.setLayout(layout)
-        self.setWindowTitle('CubingB')
-
-    def keyPressEvent(self, key):
-        if key.key() == Qt.Key.Key_Space:
-            self.gl_widget.base_quat = quat_invert(self.gl_widget.quat)
-        elif key.key() == Qt.Key.Key_Return:
-            self.handler.reset()
-
-class ScrambleWidget(QLabel):
-    def __init__(self):
-        super().__init__()
+class InstructionWidget(QLabel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        #self.setVerticalPolicy(Qt.QSizePolicy.Maximum)
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setWordWrap(True)
 
     def sizeHint(self):
-        return QSize(WINDOW_SIZE[0], 200)
+        return QSize(WINDOW_SIZE[0], 100)
+
+# Display the scramble
+
+class ScrambleWidget(QLabel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        # This shit should really be in the stylesheet, but not supported?!
+        self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.setWordWrap(True)
 
     def set_scramble(self, scramble, scramble_left):
         offset = max(len(scramble) - len(scramble_left), 0)
@@ -192,9 +273,11 @@ class ScrambleWidget(QLabel):
         self.setText(' '.join('% -2s' % s for s in left))
         self.update()
 
+# Display the cube
+
 class GLWidget(QOpenGLWidget):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent):
+        super().__init__(parent)
         self.quat = self.base_quat = [1, 0, 0, 0]
         self.gl_init = False
         self.size = None
@@ -230,6 +313,6 @@ class GLWidget(QOpenGLWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    window = Window()
+    window = CubeWindow()
     window.show()
     sys.exit(app.exec_())

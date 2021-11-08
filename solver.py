@@ -55,6 +55,10 @@ class Cube:
             if r2 is not None:
                 self.turn(r2, n2)
 
+    def __eq__(self, other):
+        return (self.centers == other.centers and self.edges == other.edges and
+                self.corners == other.corners)
+
 # Metabrogramming. Generate function for each of the turn and rotate moves.
 # This is pretty messy code, just the first random crap I hacked up that worked
 TURNS = []
