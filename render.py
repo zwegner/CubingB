@@ -100,19 +100,22 @@ def gen_verts():
                         break
 
 # Set up window and some rendering state
-def setup(window_size):
+def setup():
     glDepthFunc(GL_LEQUAL)
     glEnable(GL_DEPTH_TEST)
     glEnable(GL_POLYGON_SMOOTH)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
+def set_persective(window_size):
     # Set up view
+    [w, h] = window_size
     glMatrixMode(GL_PROJECTION)
-    gluPerspective(40, (window_size[0] / window_size[1]), 0.1, 50.0)
+    glLoadIdentity()
+    glViewport(0, 0, w, h)
+    gluPerspective(40, (w / h), 0.1, 50.0)
     glTranslatef(0, 0, -4)
 
-    # Push current view state and move to model mode
-    glPushMatrix()
+    # Switch back to the model matrix stack for rendering
     glMatrixMode(GL_MODELVIEW)
 
 def reset():
@@ -132,7 +135,6 @@ def render_cube(cube, turns):
             [cube.corners, CORNERS, solver.CORNERS],
             [dumb_centers, CENTERS, DUMB_CENTERS]]:
         for [cubie, quads, faces] in zip(cubie_set, quad_set, face_set):
-
             # See if the face this cubie is on is in a partial rotation
             glPushMatrix()
             for f in faces:
