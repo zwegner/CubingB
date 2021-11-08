@@ -8,13 +8,14 @@ import solver
 #WINDOW_SIZE = [2560, 1440]
 WINDOW_SIZE = [1600, 1000]
 
+# UDRLFB, WYROGB
 COLORS = [
-    [1, 1, 0],
     [1, 1, 1],
+    [1, 1, 0],
     [1, 0, 0],
     [1, .4, 0],
-    [0, 0, 1],
     [0, 1, 0],
+    [0, 0, 1],
     [.1, .1, .1],
 ]
 
@@ -28,16 +29,14 @@ CENTERS = [None] * 6
 # Copy of solver.CENTERS but in a much listier format
 DUMB_CENTERS = [[0], [1], [2], [3], [4], [5]]
 
-# Dumb glue code to convert weilong to solver face numbering
-FACE_REMAP = [0, 5, 3, 1, 2, 4]
-
+# Normal vector of each face for partial rotations
 AXES = [
     [0, -1, 0],
+    [0, 1, 0],
+    [-1, 0, 0],
     [1, 0, 0],
     [0, 0, -1],
-    [-1, 0, 0],
     [0, 0, 1],
-    [0, 1, 0],
 ]
 
 def gen_verts():
@@ -114,22 +113,26 @@ def setup():
     glEnable(GL_DEPTH_TEST)
     glEnable(GL_POLYGON_SMOOTH)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-    reset()
 
-# Reset the matrix, basically
-def reset():
-    glLoadIdentity()
+    # Set up view
     glMatrixMode(GL_PROJECTION)
     gluPerspective(40, (WINDOW_SIZE[0] / WINDOW_SIZE[1]), 0.1, 50.0)
     glTranslatef(0, 0, -4)
-    glRotatef(0, 0, 0, 0)
 
-def render(cube, turns):
+    # Push current view state and move to model mode
+    glPushMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+def reset():
     glClearColor(.3, .3, .3, 1)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
+def set_rotation(matrix):
+    glLoadIdentity()
+    glMultTransposeMatrixf(matrix)
+
+def render_cube(cube, turns):
     # Render cube
-    glMatrixMode(GL_MODELVIEW)
 
     dumb_centers = [[c] for c in cube.centers]
 
@@ -142,7 +145,6 @@ def render(cube, turns):
             # See if the face this cubie is on is in a partial rotation
             glPushMatrix()
             for f in faces:
-                f = FACE_REMAP[f]
                 if turns[f]:
                     # turns are in 1/9th of a quarter turn, so 10 degrees
                     glRotatef(turns[f] * 10, *AXES[f])
@@ -169,8 +171,8 @@ def render(cube, turns):
 
             glPopMatrix()
 
-    glMatrixMode(GL_PROJECTION)
 
+def flip():
     pygame.display.flip() 
 
 gen_verts()

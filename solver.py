@@ -2,14 +2,14 @@ import curses
 import enum
 import random
 
-[Y, W, R, O, B, G, X] = range(7)
+[W, Y, R, O, G, B, X] = range(7)
 
-EDGES = ((Y, B), (Y, R), (Y, G), (Y, O),
-    (B, R), (R, G), (G, O), (O, B),
-    (B, W), (R, W), (G, W), (O, W))
-CORNERS = ((Y, B, R), (Y, R, G), (Y, G, O), (Y, O, B),
-    (W, G, R), (W, R, B), (W, B, O), (W, O, G))
-CENTERS = (Y, W, R, O, B, G)
+EDGES = ((W, G), (W, R), (W, B), (W, O),
+    (G, R), (R, B), (B, O), (O, G),
+    (G, Y), (R, Y), (B, Y), (O, Y))
+CORNERS = ((W, G, R), (W, R, B), (W, B, O), (W, O, G),
+    (Y, B, R), (Y, R, G), (Y, G, O), (Y, O, B))
+CENTERS = (W, Y, R, O, G, B)
 
 up    = [2, 1,  0,  3], [0, 0, 0, 0], [2, 1, 0, 3], [0, 0, 0, 0], 0
 down  = [8, 9, 10, 11], [1, 1, 1, 1], [6, 5, 4, 7], [0, 0, 0, 0], 1
@@ -25,8 +25,11 @@ RX = [5, 4, 2, 3, 0, 1]
 RZ = [2, 3, 1, 0, 4, 5]
 ROTATE_FACES = [RY, RX, RZ]
 
-FACE_STR = 'udrlfb'
+FACE_STR = 'UDRLFB'
 ROTATE_STR = 'yxz'
+TURN_STR = {-1: "'", 1: '', 2: '2', 3: "'"}
+INV_TURN_STR = {v: k for [k, v] in TURN_STR.items()}
+assert INV_TURN_STR["'"] == 3
 
 class Cube:
     def __init__(self, centers=CENTERS, edges=EDGES, corners=CORNERS):
@@ -171,8 +174,8 @@ def parse_alg(alg):
     for move in alg.split():
         rot = rn = face = n = f2 = n2 = None
 
-        if move[0].lower() in FACE_STR:
-            face = FACE_STR.index(move[0].lower())
+        if move[0].upper() in FACE_STR:
+            face = FACE_STR.index(move[0].upper())
             n = parse_rot(move)
             # Wide moves: just rotate our representation, and flip the face
             if move[0].islower():
