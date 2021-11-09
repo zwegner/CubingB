@@ -1,4 +1,5 @@
 import contextlib
+import threading
 
 import sqlalchemy as sa
 from sqlalchemy import text
@@ -84,17 +85,23 @@ class NiceSession(Session):
         else:
             return self.insert(table, **match_args, **kwargs)
 
+THREAD_LOCALS = threading.local()
+
 @contextlib.contextmanager
 def get_session():
-    session = SESSION_MAKER()
-    try:
-        yield session
-        session.commit()
-    except:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    if getattr(THREAD_LOCALS, 'session', None):
+        yield THREAD_LOCALS.session
+    else:
+        THREAD_LOCALS.session = session = SESSION_MAKER()
+        try:
+            yield session
+            session.commit()
+        except:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+            THREAD_LOCALS.session = None
 
 def init_db(db_url):
     global SESSION_MAKER
