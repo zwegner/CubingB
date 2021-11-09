@@ -15,16 +15,24 @@ import db
 import render
 import solver
 
+# Constants
+
 WINDOW_SIZE = [1600, 1000]
 
 DB_PATH = 'sqlite:///cubingb.db'
 
-State = enum.Enum('State', 'SCRAMBLING SCRAMBLED SOLVING SOLVED')
+# Should make UI for this
+USE_SMART_CUBE = False
+
+State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
+        'SMART_SCRAMBLED SMART_SOLVING')
 
 SOLVED_CUBE = solver.Cube()
 
 STAT_AO_COUNTS = [1, 5, 12, 100]
 STAT_OUTLIER_PCT = 5
+
+TIMER_DEBOUNCE = .5
 
 # Quaternion helper functions
 
@@ -55,6 +63,8 @@ def quat_matrix(values):
         0, 0, 0, 1,
     ]
 
+# UI helpers
+
 def stat_str(size):
     if size == 1:
         return 'single'
@@ -75,11 +85,14 @@ def cell(text, editable=False):
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
 class CubeWindow(QMainWindow):
-    update_signal = pyqtSignal()
+    # Signal to just run a specified function in a Qt thread, since Qt really
+    # cares deeply which thread you're using when starting timers etc.
+    schedule_fn = pyqtSignal([object])
 
     def __init__(self):
         super().__init__()
         self.timer = None
+        self.pending_timer = None
 
         # Initialize DB and make sure there's a current session
         db.init_db(DB_PATH)
@@ -98,6 +111,9 @@ class CubeWindow(QMainWindow):
         self.instruction_widget = InstructionWidget(self)
         self.timer_widget = TimerWidget(self)
         self.session_widget = SessionWidget(self)
+
+        # Annoying: set this here so it can be overridden
+        self.setStyleSheet('TimerWidget { font: 240px Courier; }')
 
         main = QWidget()
 
@@ -121,22 +137,46 @@ class CubeWindow(QMainWindow):
 
         # Initialize bluetooth
         # Capture the return value just so it doesn't get GC'd and stop listening
-        self.bt = bluetooth.init_bluetooth(self)
+        if USE_SMART_CUBE:
+            self.bt = bluetooth.init_bluetooth(self)
 
         self.setWindowTitle('CubingB')
-        #self.grabKeyboard()
+        self.setFocus()
 
-        self.update_signal.connect(self.update_state_ui)
+        self.schedule_fn.connect(self.run_scheduled_fn)
+
+    def run_scheduled_fn(self, fn):
+        fn()
 
     def sizeHint(self):
         return QSize(*WINDOW_SIZE)
 
-    def keyPressEvent(self, key):
-        if key.key() == Qt.Key.Key_Space:
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_R:
             self.gl_widget.base_quat = quat_invert(self.gl_widget.quat)
-        elif key.key() == Qt.Key.Key_Return and self.state == State.SOLVED:
-            self.gen_scramble()
+        elif event.key() == Qt.Key.Key_Space and self.state in {State.SCRAMBLE,
+                State.SOLVING}:
+            if self.state == State.SCRAMBLE:
+                self.state = State.SOLVE_PENDING
+                self.start_pending()
+            elif self.state == State.SOLVING:
+                self.state = State.SCRAMBLE
+                self.finish_solve()
             self.update_state_ui()
+        else:
+            event.ignore()
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and self.state == State.SOLVE_PENDING:
+            if time.time() - self.pending_start > TIMER_DEBOUNCE:
+                self.state = State.SOLVING
+                self.start_solve()
+            else:
+                self.state = State.SCRAMBLE
+                self.stop_pending(False)
+            self.update_state_ui()
+        else:
+            event.ignore()
 
     def update_timer(self):
         self.timer_widget.update_time(time.time() - self.start_time, 1)
@@ -151,34 +191,48 @@ class CubeWindow(QMainWindow):
         self.instruction_widget.hide()
         self.timer_widget.hide()
 
+        self.timer_widget.set_pending(False)
+
         self.session_widget.trigger_update()
 
-        if self.state == State.SCRAMBLING:
+        if self.state == State.SCRAMBLE:
+            self.scramble_widget.show()
+            self.timer_widget.show()
+        elif self.state == State.SOLVE_PENDING:
+            self.timer_widget.update_time(0, 3)
+            self.timer_widget.show()
+        elif self.state == State.SOLVING:
+            self.timer_widget.show()
+        elif self.state == State.SMART_SCRAMBLING:
             self.scramble_widget.show()
             self.gl_widget.show()
-        elif self.state == State.SCRAMBLED:
+        elif self.state == State.SMART_SCRAMBLED:
             self.instruction_widget.setText("Start solving when you're ready!")
             self.instruction_widget.show()
             self.gl_widget.show()
-        elif self.state == State.SOLVING:
-            self.timer_widget.show()
-            # Start UI timer to update timer view
-            self.timer = QTimer()
-            self.timer.timeout.connect(self.update_timer)
-            self.timer.start(100)
-        elif self.state == State.SOLVED:
-            self.instruction_widget.setText("Press Enter for next solve")
-            self.instruction_widget.show()
+        elif self.state == State.SMART_SOLVING:
             self.timer_widget.show()
 
-            # Stop UI timer
-            self.timer.stop()
-            self.timer = None
-            self.timer_widget.update_time(self.final_time, 3)
+    def start_pending(self):
+        self.pending_start = time.time()
+        self.pending_timer = QTimer()
+        self.pending_timer.timeout.connect(self.set_pending)
+        self.pending_timer.start(int(1000 * TIMER_DEBOUNCE))
+
+    def stop_pending(self, pending):
+        self.pending_timer.stop()
+        self.pending_timer = None
+        self.timer_widget.set_pending(pending)
+
+    def set_pending(self):
+        self.stop_pending(True)
 
     def gen_scramble(self):
         self.reset()
-        self.state = State.SCRAMBLING
+        if USE_SMART_CUBE:
+            self.state = State.SMART_SCRAMBLING
+        else:
+            self.state = State.SCRAMBLE
         self.scramble = []
         self.solve_moves = []
         self.start_time = None
@@ -198,6 +252,36 @@ class CubeWindow(QMainWindow):
 
         self.mark_changed()
 
+    def start_solve(self):
+        self.start_time = time.time()
+        self.end_time = None
+        self.final_time = None
+        # Start UI timer to update timer view
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(100)
+
+    def finish_solve(self):
+        self.end_time = time.time()
+        self.final_time = self.end_time - self.start_time
+
+        # Stop UI timer
+        if self.timer:
+            self.timer.stop()
+            self.timer = None
+            self.timer_widget.update_time(self.final_time, 3)
+
+        # Update database
+        with db.get_session() as session:
+            sesh = session.query_first(db.Settings).current_session
+            session.insert(db.Solve, session=sesh,
+                    scramble=' '.join(self.scramble),
+                    time_ms=int(self.final_time * 1000))
+
+        self.gen_scramble()
+
+    # Smart cube stuff
+
     def check_solved(self):
         return self.cube == SOLVED_CUBE
 
@@ -214,10 +298,8 @@ class CubeWindow(QMainWindow):
         cube = copy.deepcopy(self.cube)
         turns = self.turns[:]
 
-        if self.scramble_widget:
-            self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
-        if self.gl_widget:
-            self.gl_widget.set_render_data(cube, turns, self.quat)
+        self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
+        self.gl_widget.set_render_data(cube, turns, self.quat)
 
     # Make a move and update any state for either a scramble or a solve
     def make_turn(self, face, turn):
@@ -226,7 +308,7 @@ class CubeWindow(QMainWindow):
         self.cube.run_alg(alg)
         old_state = self.state
         # Scrambling: see if this is the next move of the scramble
-        if self.state == State.SCRAMBLING:
+        if self.state == State.SMART_SCRAMBLING:
             s_face = self.scramble_left[0][0]
             s_turn = solver.INV_TURN_STR[self.scramble_left[0][1:]]
             if face == s_face:
@@ -234,7 +316,7 @@ class CubeWindow(QMainWindow):
                 if not s_turn:
                     self.scramble_left.pop(0)
                     if not self.scramble_left:
-                        self.state = State.SCRAMBLED
+                        self.state = State.SMART_SCRAMBLED
                 else:
                     new_turn = solver.TURN_STR[s_turn]
                     self.scramble_left[0] = face + new_turn
@@ -242,26 +324,20 @@ class CubeWindow(QMainWindow):
                 new_turn = solver.TURN_STR[-turn % 4]
                 self.scramble_left.insert(0, face + new_turn)
         # Scrambled: begin a solve
-        elif self.state == State.SCRAMBLED:
-            self.state = State.SOLVING
-            self.start_time = time.time()
+        elif self.state == State.SMART_SCRAMBLED:
+            self.state = State.SMART_SOLVING
+            # Have to start timers in a qt thread
+            self.schedule_fn.emit(self.start_solve)
         # Solving: check for a complete solve
-        elif self.state == State.SOLVING:
+        elif self.state == State.SMART_SOLVING:
             if self.check_solved():
-                self.state = State.SOLVED
-                self.end_time = time.time()
-                self.final_time = self.end_time - self.start_time
-                # Update database
-                with db.get_session() as session:
-                    sesh = session.query_first(db.Settings).current_session
-                    session.insert(db.Solve, session=sesh,
-                            scramble=' '.join(self.scramble),
-                            time_ms=int(self.final_time * 1000))
+                self.state = State.SMART_SCRAMBLING
+                self.schedule_fn.emit(self.finish_solve)
 
         # XXX handle after-solve-but-pre-scramble moves
 
         if self.state != old_state:
-            self.update_signal.emit()
+            self.schedule_fn.emit(self.update_state_ui)
 
     # XXX for now we use weilong units, 1/36th turns
     def update_turn(self, face, turn):
@@ -291,9 +367,13 @@ class CubeWindow(QMainWindow):
 class TimerWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
-        self.setStyleSheet('TimerWidget { font: 240px Courier; }')
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def set_pending(self, pending):
+        color = 'red' if pending else 'black'
+        self.setStyleSheet('TimerWidget { color: %s }' % color)
+        self.update()
 
     def update_time(self, t, prec):
         # Set up a format string since there's no .*f formatting
@@ -322,8 +402,13 @@ class ScrambleWidget(QLabel):
     def set_scramble(self, scramble, scramble_left):
         offset = max(len(scramble) - len(scramble_left), 0)
         left = ['-'] * len(scramble)
-        for i in range(min(5, len(scramble_left), len(left))):
-            left[offset+i] = scramble_left[i]
+        # Only show next 5 moves, so it looks fancy
+        if USE_SMART_CUBE:
+            for i in range(min(5, len(scramble_left), len(left))):
+                left[offset+i] = scramble_left[i]
+        else:
+            for i in range(len(scramble_left)):
+                left[offset+i] = scramble_left[i]
         self.setText(' '.join('% -2s' % s for s in left))
         self.update()
 
