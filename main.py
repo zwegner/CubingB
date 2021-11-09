@@ -17,6 +17,8 @@ import solver
 
 WINDOW_SIZE = [1600, 1000]
 
+DB_PATH = 'sqlite:///cubingb.db'
+
 def quat_mul(q1, q2):
     [a, b, c, d] = q1
     [w, x, y, z] = q2
@@ -58,7 +60,7 @@ class CubeWindow(QMainWindow):
         self.timer = None
 
         # Initialize DB, upsert a session and set it as current
-        db.init_db('sqlite:///cubingb.db')
+        db.init_db(DB_PATH)
         with db.get_session() as session:
             sesh = session.upsert(db.CubeSession, {'name': '3x3'})
             session.upsert(db.Settings, {}, current_session=sesh)

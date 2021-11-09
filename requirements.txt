@@ -2,3 +2,4 @@ pyobjc
 PyOpenGL
 PyQt5
 sqlalchemy
+alembic
