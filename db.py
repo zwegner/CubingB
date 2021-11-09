@@ -38,6 +38,8 @@ class CubeSession(Base, NiceBase):
     __tablename__ = 'sessions'
     name = Column(String(128))
     scramble_type = Column(String(64))
+    cached_stats_current = Column(JSON)
+    cached_stats_best = Column(JSON)
 
 class Solve(Base, NiceBase):
     __tablename__ = 'solves'
@@ -48,6 +50,8 @@ class Solve(Base, NiceBase):
     smart_data = Column(JSON)
     notes = Column(Text)
     time_ms = Column(Integer)
+    # Rolling stats for the containing session
+    cached_stats = Column(JSON)
 
 class Settings(Base, NiceBase):
     __tablename__ = 'settings'

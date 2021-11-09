@@ -8,7 +8,7 @@ import time
 from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
-        QSizePolicy)
+        QSizePolicy, QGridLayout)
 
 import bluetooth
 import db
@@ -18,6 +18,15 @@ import solver
 WINDOW_SIZE = [1600, 1000]
 
 DB_PATH = 'sqlite:///cubingb.db'
+
+State = enum.Enum('State', 'SCRAMBLING SCRAMBLED SOLVING SOLVED')
+
+SOLVED_CUBE = solver.Cube()
+
+STAT_AO_COUNTS = [1, 5, 12, 100]
+STAT_OUTLIER_PCT = 5
+
+# Quaternion helper functions
 
 def quat_mul(q1, q2):
     [a, b, c, d] = q1
@@ -45,10 +54,6 @@ def quat_matrix(values):
         2*x*z - 2*w*y, 2*y*z + 2*w*x, w*w - x*x - y*y + z*z, 0,
         0, 0, 0, 1,
     ]
-
-State = enum.Enum('State', 'SCRAMBLING SCRAMBLED SOLVING SOLVED')
-
-SOLVED_CUBE = solver.Cube()
 
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
@@ -303,18 +308,24 @@ class ScrambleWidget(QLabel):
         self.setText(' '.join('% -2s' % s for s in left))
         self.update()
 
-class SessionWidget(QLabel):
+class SessionWidget(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.setStyleSheet('SessionWidget { max-width: 300px; }')
 
-        self.label = QLabel(self)
+        self.label = QLabel()
+        self.stats = QWidget()
+        self.stat_grid = QGridLayout()
+        self.stats.setLayout(self.stat_grid)
         self.table = QTableWidget()
-        self.table.setColumnCount(1)
+        self.table.setColumnCount(3)
         self.table.setHorizontalHeaderItem(0, QTableWidgetItem('Time'))
+        self.table.setHorizontalHeaderItem(1, QTableWidgetItem('ao5'))
+        self.table.setHorizontalHeaderItem(2, QTableWidgetItem('ao12'))
 
         layout = QVBoxLayout()
         layout.addWidget(self.label)
+        layout.addWidget(self.stats)
         layout.addWidget(self.table)
         self.setLayout(layout)
 
@@ -323,15 +334,90 @@ class SessionWidget(QLabel):
             sesh = session.query_first(db.Settings).current_session
             self.label.setText(sesh.name)
 
-            solves = list(session.query_all(db.Solve, session=sesh))
+            # Get solves
+            # XXX assumes the query returns in chronological order
+            solves = list(reversed(session.query_all(db.Solve, session=sesh)))
 
+            if not solves:
+                return
+
+            # Calculate statistics
+            def calc_ao(start, size):
+                if size == 1:
+                    label = 'single'
+                else:
+                    label = 'ao%s' % size
+
+                if len(solves) - start < size:
+                    mean = None
+                else:
+                    times = [s.time_ms for s in solves[start:start+size]]
+                    if size > 1:
+                        times.sort()
+                        outliers = (size * STAT_OUTLIER_PCT + 99) // 100
+                        times = times[outliers:-outliers]
+                    mean = sum(times) / len(times)
+
+                return [label, mean]
+
+            def mean_str(mean):
+                if not mean:
+                    return '-'
+                return '%.3f' % (mean / 1000)
+
+            self.stat_grid.addWidget(QLabel('current'), 0, 1)
+            self.stat_grid.addWidget(QLabel('best'), 0, 2)
+
+            all_times = [s.time_ms for s in solves]
+            stats_current = sesh.cached_stats_current or {}
+            stats_best = sesh.cached_stats_best or {}
+            for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
+                [label, mean] = calc_ao(0, size)
+
+                # Update best stats, recalculating if necessary. This
+                # recalculation is pretty inefficient, but should rarely
+                # happen--I guess just when solves are imported or when the
+                # session is edited
+                stats_current[label] = mean
+                if label not in stats_best:
+                    best = None
+                    for i in range(0, len(all_times)):
+                        [_, m] = calc_ao(i, size)
+                        # Update rolling cache stats
+                        if solves[i].cached_stats is None:
+                            solves[i].cached_stats = {}
+                        solves[i].cached_stats[label] = m
+
+                        if not best or m and m < best:
+                            best = m
+                    stats_best[label] = best
+                else:
+                    best = stats_best[label]
+                    if not best or mean < best:
+                        best = stats_best[label] = mean
+
+                i = stat_idx + 1
+                self.stat_grid.addWidget(QLabel(label), i, 0)
+                self.stat_grid.addWidget(QLabel(mean_str(mean)), i, 1)
+                self.stat_grid.addWidget(QLabel(mean_str(best)), i, 2)
+
+            sesh.cached_stats_current = stats_current
+            sesh.cached_stats_best = stats_best
+            solves[0].cached_stats = stats_current
+
+            # Build the table of actual solves
             self.table.setRowCount(len(solves))
 
-            for [i, solve] in enumerate(reversed(solves)):
+            for [i, solve] in enumerate(solves):
                 self.table.setVerticalHeaderItem(i,
                         QTableWidgetItem('%s' % (len(solves) - i)))
                 self.table.setItem(i, 0,
                         QTableWidgetItem('%.3f' % (solve.time_ms / 1000)))
+                stats = solve.cached_stats or {}
+                self.table.setItem(i, 1,
+                        QTableWidgetItem(mean_str(stats.get('ao5'))))
+                self.table.setItem(i, 2,
+                        QTableWidgetItem(mean_str(stats.get('ao12'))))
 
 # Display the cube
 
