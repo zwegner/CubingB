@@ -34,6 +34,8 @@ STAT_OUTLIER_PCT = 5
 
 TIMER_DEBOUNCE = .5
 
+INF = float('+inf')
+
 # Quaternion helper functions
 
 def quat_mul(q1, q2):
@@ -71,10 +73,23 @@ def stat_str(size):
     else:
         return 'ao%s' % size
 
-def ms_str(mean):
-    if not mean:
+def solve_time(solve):
+    if solve.dnf:
+        return INF
+    t = solve.time_ms
+    if solve.plus_2:
+        t += 2000
+    return t
+
+def ms_str(ms):
+    if not ms:
         return '-'
-    return '%.3f' % (mean / 1000)
+    if ms == INF:
+        return 'DNF'
+    if ms > 60000:
+        [minutes, ms] = divmod(ms, 60000)
+        return '%d:%06.3f' % (minutes, ms / 1000)
+    return '%.3f' % (ms / 1000)
 
 def cell(text, editable=False):
     item = QTableWidgetItem(text)
@@ -484,8 +499,8 @@ class SessionWidget(QWidget):
             self.selector.currentIndexChanged.connect(self.change_session)
 
             # Get solves
-            # XXX assumes the query returns in chronological order
-            solves = list(reversed(session.query_all(db.Solve, session=sesh)))
+            solves = list(reversed(session.query(db.Solve).filter_by(session=sesh)
+                    .order_by(db.Solve.created_at).all()))
 
             self.table.clearContents()
             self.table.setRowCount(0)
@@ -504,7 +519,7 @@ class SessionWidget(QWidget):
                 if len(solves) - start < size:
                     mean = None
                 else:
-                    times = [s.time_ms for s in solves[start:start+size]]
+                    times = [solve_time(s) for s in solves[start:start+size]]
                     if size > 1:
                         times.sort()
                         outliers = (size * STAT_OUTLIER_PCT + 99) // 100
@@ -516,7 +531,6 @@ class SessionWidget(QWidget):
             self.stat_grid.addWidget(QLabel('current'), 0, 1)
             self.stat_grid.addWidget(QLabel('best'), 0, 2)
 
-            all_times = [s.time_ms for s in solves]
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
             for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
@@ -530,7 +544,7 @@ class SessionWidget(QWidget):
                 stats_current[label] = mean
                 if label not in stats_best:
                     best = None
-                    for i in range(0, len(all_times)):
+                    for i in range(0, len(solves)):
                         m = calc_ao(i, size)
                         # Update rolling cache stats
                         if solves[i].cached_stats is None:
@@ -561,7 +575,7 @@ class SessionWidget(QWidget):
                 self.table.setVerticalHeaderItem(i,
                         cell('%s' % (len(solves) - i)))
                 self.table.setItem(i, 0,
-                        cell('%.3f' % (solve.time_ms / 1000)))
+                        cell(ms_str(solve_time(solve))))
                 stats = solve.cached_stats or {}
                 self.table.setItem(i, 1,
                         cell(ms_str(stats.get('ao5'))))

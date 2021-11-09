@@ -2,8 +2,8 @@ import contextlib
 import threading
 
 import sqlalchemy as sa
-from sqlalchemy import text
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (text, Column, Index, Boolean, DateTime, ForeignKey,
+        Integer, String, Text)
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Session, sessionmaker
@@ -51,8 +51,13 @@ class Solve(Base, NiceBase):
     smart_data = Column(JSON)
     notes = Column(Text)
     time_ms = Column(Integer)
+    dnf = Column(Boolean, default=False)
+    plus_2 = Column(Boolean, default=False)
+    segment_time_ms = Column(JSON)
     # Rolling stats for the containing session
     cached_stats = Column(JSON)
+
+Index('solve_session_idx', Solve.session_id, Solve.created_at)
 
 class Settings(Base, NiceBase):
     __tablename__ = 'settings'
