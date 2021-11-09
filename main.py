@@ -8,7 +8,7 @@ import time
 from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
-        QSizePolicy, QGridLayout, QComboBox)
+        QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox)
 
 import bluetooth
 import db
@@ -55,6 +55,23 @@ def quat_matrix(values):
         0, 0, 0, 1,
     ]
 
+def stat_str(size):
+    if size == 1:
+        return 'single'
+    else:
+        return 'ao%s' % size
+
+def ms_str(mean):
+    if not mean:
+        return '-'
+    return '%.3f' % (mean / 1000)
+
+def cell(text, editable=False):
+    item = QTableWidgetItem(text)
+    if not editable:
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+    return item
+
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
 class CubeWindow(QMainWindow):
@@ -69,7 +86,8 @@ class CubeWindow(QMainWindow):
         with db.get_session() as session:
             settings = session.upsert(db.Settings, {})
             if not settings.current_session:
-                sesh = session.insert(db.CubeSession, name='New Session')
+                sesh = session.insert(db.CubeSession, name='New Session',
+                        scramble_type='3x3')
                 settings.current_session = sesh
 
         # Create basic layout/widgets. We do this first because the various
@@ -106,7 +124,7 @@ class CubeWindow(QMainWindow):
         self.bt = bluetooth.init_bluetooth(self)
 
         self.setWindowTitle('CubingB')
-        self.grabKeyboard()
+        #self.grabKeyboard()
 
         self.update_signal.connect(self.update_state_ui)
 
@@ -326,9 +344,9 @@ class SessionWidget(QWidget):
 
         self.table = QTableWidget()
         self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderItem(0, QTableWidgetItem('Time'))
-        self.table.setHorizontalHeaderItem(1, QTableWidgetItem('ao5'))
-        self.table.setHorizontalHeaderItem(2, QTableWidgetItem('ao12'))
+        self.table.setHorizontalHeaderItem(0, cell('Time'))
+        self.table.setHorizontalHeaderItem(1, cell('ao5'))
+        self.table.setHorizontalHeaderItem(2, cell('ao12'))
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
@@ -336,11 +354,24 @@ class SessionWidget(QWidget):
         layout.addWidget(self.table)
         self.layout = layout
 
+        self.session_editor = SessionEditorWidget(self)
+
     def change_session(self, index):
         with db.get_session() as session:
             settings = session.upsert(db.Settings, {})
-            settings.current_session = session.query_first(db.CubeSession,
-                    id=self.session_ids[index])
+
+            id = self.session_ids[index]
+            if id == 'new':
+                sesh = session.insert(db.CubeSession, name='New Session',
+                        scramble_type='3x3')
+                settings.current_session = sesh
+            elif id == 'edit':
+                self.session_editor.update_items()
+                self.session_editor.exec()
+            elif id == 'delete':
+                assert 0
+            else:
+                settings.current_session = session.query_first(db.CubeSession, id=id)
             session.flush()
             self.trigger_update()
 
@@ -360,6 +391,9 @@ class SessionWidget(QWidget):
                 self.selector.addItem(s.name)
                 if s.id == sesh.id:
                     self.selector.setCurrentIndex(i)
+            for cmd in ['new', 'edit', 'delete']:
+                self.session_ids[self.selector.count()] = cmd
+                self.selector.addItem(cmd.title() + '...')
 
             # Restore signal handler per hack above
             self.selector.currentIndexChanged.connect(self.change_session)
@@ -382,11 +416,6 @@ class SessionWidget(QWidget):
 
             # Calculate statistics
             def calc_ao(start, size):
-                if size == 1:
-                    label = 'single'
-                else:
-                    label = 'ao%s' % size
-
                 if len(solves) - start < size:
                     mean = None
                 else:
@@ -397,12 +426,7 @@ class SessionWidget(QWidget):
                         times = times[outliers:-outliers]
                     mean = sum(times) / len(times)
 
-                return [label, mean]
-
-            def mean_str(mean):
-                if not mean:
-                    return '-'
-                return '%.3f' % (mean / 1000)
+                return mean
 
             self.stat_grid.addWidget(QLabel('current'), 0, 1)
             self.stat_grid.addWidget(QLabel('best'), 0, 2)
@@ -411,7 +435,8 @@ class SessionWidget(QWidget):
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
             for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
-                [label, mean] = calc_ao(0, size)
+                label = stat_str(size)
+                mean = calc_ao(0, size)
 
                 # Update best stats, recalculating if necessary. This
                 # recalculation is pretty inefficient, but should rarely
@@ -421,7 +446,7 @@ class SessionWidget(QWidget):
                 if label not in stats_best:
                     best = None
                     for i in range(0, len(all_times)):
-                        [_, m] = calc_ao(i, size)
+                        m = calc_ao(i, size)
                         # Update rolling cache stats
                         if solves[i].cached_stats is None:
                             solves[i].cached_stats = {}
@@ -437,8 +462,8 @@ class SessionWidget(QWidget):
 
                 i = stat_idx + 1
                 self.stat_grid.addWidget(QLabel(label), i, 0)
-                self.stat_grid.addWidget(QLabel(mean_str(mean)), i, 1)
-                self.stat_grid.addWidget(QLabel(mean_str(best)), i, 2)
+                self.stat_grid.addWidget(QLabel(ms_str(mean)), i, 1)
+                self.stat_grid.addWidget(QLabel(ms_str(best)), i, 2)
 
             sesh.cached_stats_current = stats_current
             sesh.cached_stats_best = stats_best
@@ -449,14 +474,87 @@ class SessionWidget(QWidget):
 
             for [i, solve] in enumerate(solves):
                 self.table.setVerticalHeaderItem(i,
-                        QTableWidgetItem('%s' % (len(solves) - i)))
+                        cell('%s' % (len(solves) - i)))
                 self.table.setItem(i, 0,
-                        QTableWidgetItem('%.3f' % (solve.time_ms / 1000)))
+                        cell('%.3f' % (solve.time_ms / 1000)))
                 stats = solve.cached_stats or {}
                 self.table.setItem(i, 1,
-                        QTableWidgetItem(mean_str(stats.get('ao5'))))
+                        cell(ms_str(stats.get('ao5'))))
                 self.table.setItem(i, 2,
-                        QTableWidgetItem(mean_str(stats.get('ao12'))))
+                        cell(ms_str(stats.get('ao12'))))
+
+class SessionEditorWidget(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(3 + len(STAT_AO_COUNTS))
+        self.table.setHorizontalHeaderItem(0, cell('ID'))
+        self.table.setHorizontalHeaderItem(1, cell('Name'))
+        self.table.setHorizontalHeaderItem(2, cell('Scramble type'))
+        for [i, stat] in enumerate(STAT_AO_COUNTS):
+            self.table.setHorizontalHeaderItem(3+i, cell(stat_str(stat)))
+
+        self.table.itemChanged.connect(self.item_edited)
+
+        button = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button.accepted.connect(self.accept_edits)
+        button.rejected.connect(self.reject_edits)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table)
+        layout.addWidget(button)
+
+        self.current_edits = {}
+
+    def item_edited(self, item):
+        self.current_edits[item.session_id] = item.text()
+
+    def accept_edits(self):
+        # Make sure to change focus to the window in case the user clicked OK
+        # while still editing. Without the focus change, the itemChanged signal
+        # is fired after we accept changes, so we'd lose the last edit, and it
+        # would get silently added to the next edit action
+        self.setFocus()
+
+        with db.get_session() as session:
+            for [id, name] in self.current_edits.items():
+                sesh = session.query_first(db.CubeSession, id=id)
+                sesh.name = name
+            self.current_edits = {}
+        self.accept()
+
+    def reject_edits(self):
+        self.current_edits = {}
+        self.reject()
+
+    def sizeHint(self):
+        return QSize(600, 500)
+
+    def update_items(self):
+        # HACK: disconnect the edit signal
+        self.table.itemChanged.disconnect(self.item_edited)
+
+        self.table.clearContents()
+        self.table.setRowCount(0)
+        with db.get_session() as session:
+            sessions = session.query_all(db.CubeSession)
+            self.table.setRowCount(len(sessions))
+            for [i, sesh] in enumerate(sessions):
+                stats = sesh.cached_stats_best or {}
+                self.table.setItem(i, 0, cell(str(sesh.id)))
+                name_widget = cell(sesh.name, editable=True)
+                # Just set an attribute on the cell to pass data around?
+                # Probably not supposed to do this but it works
+                name_widget.session_id = sesh.id
+                self.table.setItem(i, 1, name_widget)
+                self.table.setItem(i, 2, cell(sesh.scramble_type))
+                for [j, stat] in enumerate(STAT_AO_COUNTS):
+                    stat = stat_str(stat)
+                    self.table.setItem(i, 3+j,
+                            cell(ms_str(stats.get(stat))))
+
+        self.table.itemChanged.connect(self.item_edited)
 
 # Display the cube
 
