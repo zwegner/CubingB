@@ -6,8 +6,9 @@ import sys
 import time
 
 from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QWidget,
-        QOpenGLWidget, QLabel)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
+        QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
+        QSizePolicy)
 
 import bluetooth
 import db
@@ -55,17 +56,40 @@ class CubeWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.timer = None
-        self.gl_widget = None
-        self.scramble_widget = None
-        self.instruction_widget = None
-        self.timer_widget = None
-        self.gen_scramble()
 
+        # Initialize DB, upsert a session and set it as current
         db.init_db('sqlite:///cubingb.db')
-        # Create a session and set it as current
         with db.get_session() as session:
             sesh = session.upsert(db.CubeSession, {'name': '3x3'})
             session.upsert(db.Settings, {}, current_session=sesh)
+
+        # Create basic layout/widgets. We do this first because the various
+        # initialization functions can send data to the appropriate widgets to
+        # update the view, and it's simpler to just always have them available
+        self.gl_widget = GLWidget(self)
+        self.scramble_widget = ScrambleWidget(self)
+        self.instruction_widget = InstructionWidget(self)
+        self.timer_widget = TimerWidget(self)
+        self.session_widget = SessionWidget(self)
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.session_widget)
+
+        right = QWidget()
+        right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(self.instruction_widget)
+        right_layout.addWidget(self.scramble_widget)
+        right_layout.addWidget(self.gl_widget)
+        right_layout.addWidget(self.timer_widget)
+        right.setLayout(right_layout)
+        layout.addWidget(right)
+
+        main = QWidget()
+        main.setLayout(layout)
+        self.setCentralWidget(main)
+
+        self.gen_scramble()
 
         self.update_state_ui()
 
@@ -76,13 +100,10 @@ class CubeWindow(QMainWindow):
         self.setWindowTitle('CubingB')
         self.grabKeyboard()
 
-        # Set up styles
-        self.setStyleSheet('''ScrambleWidget { font: 48px Courier; }
-                InstructionWidget { font: 40px; }
-                TimerWidget { font: 240px Courier; }''')
-
-
         self.update_signal.connect(self.update_state_ui)
+
+    def sizeHint(self):
+        return QSize(*WINDOW_SIZE)
 
     def keyPressEvent(self, key):
         if key.key() == Qt.Key.Key_Space:
@@ -96,47 +117,38 @@ class CubeWindow(QMainWindow):
 
     # Change UI modes based on state
     def update_state_ui(self):
-        self.widget = QWidget()
-        self.layout = QVBoxLayout()
-
-        self.gl_widget = None
-        self.scramble_widget = None
-        self.instruction_widget = None
-        self.timer_widget = None
-
-        self.gl_widget = GLWidget(self)
         self.mark_changed()
 
+        # Hide things that are only shown conditionally below
+        self.gl_widget.hide()
+        self.scramble_widget.hide()
+        self.instruction_widget.hide()
+        self.timer_widget.hide()
+
+        self.session_widget.trigger_update()
+
         if self.state == State.SCRAMBLING:
-            self.scramble_widget = ScrambleWidget(self)
-            self.layout.addWidget(self.scramble_widget)
-            self.layout.addWidget(self.gl_widget)
+            self.scramble_widget.show()
+            self.gl_widget.show()
         elif self.state == State.SCRAMBLED:
-            self.instruction_widget = InstructionWidget(self)
             self.instruction_widget.setText("Start solving when you're ready!")
-            self.layout.addWidget(self.instruction_widget)
-            self.layout.addWidget(self.gl_widget)
+            self.instruction_widget.show()
+            self.gl_widget.show()
         elif self.state == State.SOLVING:
-            self.instruction_widget = InstructionWidget(self)
-            self.timer_widget = TimerWidget(self)
-            self.instruction_widget.setText("")
-            self.layout.addWidget(self.instruction_widget)
-            self.layout.addWidget(self.timer_widget)
+            self.timer_widget.show()
+            # Start UI timer to update timer view
             self.timer = QTimer()
             self.timer.timeout.connect(self.update_timer)
             self.timer.start(100)
         elif self.state == State.SOLVED:
-            self.instruction_widget = InstructionWidget(self)
+            self.instruction_widget.setText("Press Enter for next solve")
+            self.instruction_widget.show()
+            self.timer_widget.show()
+
+            # Stop UI timer
             self.timer.stop()
             self.timer = None
-            self.timer_widget = TimerWidget(self)
             self.timer_widget.update_time(self.final_time, 3)
-            self.instruction_widget.setText("That was pretty cool.")
-            self.layout.addWidget(self.instruction_widget)
-            self.layout.addWidget(self.timer_widget)
-
-        self.setCentralWidget(self.widget)
-        self.widget.setLayout(self.layout)
 
     def gen_scramble(self):
         self.reset()
@@ -253,6 +265,7 @@ class CubeWindow(QMainWindow):
 class TimerWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
+        self.setStyleSheet('TimerWidget { font: 240px Courier; }')
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -265,19 +278,17 @@ class TimerWidget(QLabel):
 class InstructionWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
-        #self.setVerticalPolicy(Qt.QSizePolicy.Maximum)
+        self.setStyleSheet('InstructionWidget { font: 40px; max-height: 100px }')
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setWordWrap(True)
-
-    def sizeHint(self):
-        return QSize(WINDOW_SIZE[0], 100)
 
 # Display the scramble
 
 class ScrambleWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
+        self.setStyleSheet('ScrambleWidget { font: 48px Courier; max-height: 100px }')
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setWordWrap(True)
@@ -285,10 +296,40 @@ class ScrambleWidget(QLabel):
     def set_scramble(self, scramble, scramble_left):
         offset = max(len(scramble) - len(scramble_left), 0)
         left = ['-'] * len(scramble)
-        for i in range(min(5, len(scramble_left))):
+        for i in range(min(5, len(scramble_left), len(left))):
             left[offset+i] = scramble_left[i]
         self.setText(' '.join('% -2s' % s for s in left))
         self.update()
+
+class SessionWidget(QLabel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setStyleSheet('SessionWidget { max-width: 300px; }')
+
+        self.label = QLabel(self)
+        self.table = QTableWidget()
+        self.table.setColumnCount(1)
+        self.table.setHorizontalHeaderItem(0, QTableWidgetItem('Time'))
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.label)
+        layout.addWidget(self.table)
+        self.setLayout(layout)
+
+    def trigger_update(self):
+        with db.get_session() as session:
+            sesh = session.query_first(db.Settings).current_session
+            self.label.setText(sesh.name)
+
+            solves = list(session.query_all(db.Solve, session=sesh))
+
+            self.table.setRowCount(len(solves))
+
+            for [i, solve] in enumerate(reversed(solves)):
+                self.table.setVerticalHeaderItem(i,
+                        QTableWidgetItem('%s' % (len(solves) - i)))
+                self.table.setItem(i, 0,
+                        QTableWidgetItem('%.3f' % (solve.time_ms / 1000)))
 
 # Display the cube
 
@@ -304,9 +345,6 @@ class GLWidget(QOpenGLWidget):
         self.turns = turns
         self.quat = quat
         self.update()
-
-    def sizeHint(self):
-        return QSize(*WINDOW_SIZE)
 
     def initializeGL(self):
         self.gl_init = True
