@@ -8,7 +8,7 @@ import time
 from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
-        QSizePolicy, QGridLayout)
+        QSizePolicy, QGridLayout, QComboBox)
 
 import bluetooth
 import db
@@ -64,11 +64,13 @@ class CubeWindow(QMainWindow):
         super().__init__()
         self.timer = None
 
-        # Initialize DB, upsert a session and set it as current
+        # Initialize DB and make sure there's a current session
         db.init_db(DB_PATH)
         with db.get_session() as session:
-            sesh = session.upsert(db.CubeSession, {'name': '3x3'})
-            session.upsert(db.Settings, {}, current_session=sesh)
+            settings = session.upsert(db.Settings, {})
+            if not settings.current_session:
+                sesh = session.insert(db.CubeSession, name='New Session')
+                settings.current_session = sesh
 
         # Create basic layout/widgets. We do this first because the various
         # initialization functions can send data to the appropriate widgets to
@@ -79,21 +81,20 @@ class CubeWindow(QMainWindow):
         self.timer_widget = TimerWidget(self)
         self.session_widget = SessionWidget(self)
 
-        layout = QHBoxLayout()
+        main = QWidget()
+
+        layout = QHBoxLayout(main)
         layout.addWidget(self.session_widget)
 
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        right_layout = QVBoxLayout()
+        right_layout = QVBoxLayout(right)
         right_layout.addWidget(self.instruction_widget)
         right_layout.addWidget(self.scramble_widget)
         right_layout.addWidget(self.gl_widget)
         right_layout.addWidget(self.timer_widget)
-        right.setLayout(right_layout)
         layout.addWidget(right)
 
-        main = QWidget()
-        main.setLayout(layout)
         self.setCentralWidget(main)
 
         self.gen_scramble()
@@ -313,30 +314,68 @@ class SessionWidget(QWidget):
         super().__init__(parent)
         self.setStyleSheet('SessionWidget { max-width: 300px; }')
 
-        self.label = QLabel()
+        title = QWidget()
+        title_layout = QHBoxLayout(title)
+        self.label = QLabel('Session:')
+        self.selector = QComboBox()
+        self.selector.currentIndexChanged.connect(self.change_session)
+        title_layout.addWidget(self.label)
+        title_layout.addWidget(self.selector)
+
         self.stats = QWidget()
-        self.stat_grid = QGridLayout()
-        self.stats.setLayout(self.stat_grid)
+
         self.table = QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderItem(0, QTableWidgetItem('Time'))
         self.table.setHorizontalHeaderItem(1, QTableWidgetItem('ao5'))
         self.table.setHorizontalHeaderItem(2, QTableWidgetItem('ao12'))
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.label)
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
         layout.addWidget(self.stats)
         layout.addWidget(self.table)
-        self.setLayout(layout)
+        self.layout = layout
+
+    def change_session(self, index):
+        with db.get_session() as session:
+            settings = session.upsert(db.Settings, {})
+            settings.current_session = session.query_first(db.CubeSession,
+                    id=self.session_ids[index])
+            session.flush()
+            self.trigger_update()
 
     def trigger_update(self):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
-            self.label.setText(sesh.name)
+
+            # HACK: disconnect the signal handler so we don't trigger a recursive
+            # update
+            self.selector.currentIndexChanged.disconnect(self.change_session)
+
+            # Set up dropdown
+            self.selector.clear()
+            self.session_ids = {}
+            for [i, s] in enumerate(session.query_all(db.CubeSession)):
+                self.session_ids[i] = s.id
+                self.selector.addItem(s.name)
+                if s.id == sesh.id:
+                    self.selector.setCurrentIndex(i)
+
+            # Restore signal handler per hack above
+            self.selector.currentIndexChanged.connect(self.change_session)
 
             # Get solves
             # XXX assumes the query returns in chronological order
             solves = list(reversed(session.query_all(db.Solve, session=sesh)))
+
+            self.table.clearContents()
+            self.table.setRowCount(0)
+
+            # Clear the stats in an annoying way
+            self.layout.removeWidget(self.stats)
+            self.stats = QWidget()
+            self.stat_grid = QGridLayout(self.stats)
+            self.layout.insertWidget(1, self.stats)
 
             if not solves:
                 return
