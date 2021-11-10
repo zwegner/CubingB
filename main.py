@@ -9,7 +9,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
-        QAbstractItemView, QHeaderView, QFrame)
+        QAbstractItemView, QHeaderView, QFrame, QCheckBox)
 
 import bluetooth
 import config
@@ -80,6 +80,13 @@ def solve_time(solve):
     if solve.plus_2:
         t += 2000
     return t
+
+def solve_time_str(solve):
+    if solve.dnf:
+        return 'DNF'
+    if solve.plus_2:
+        return '%s +2' % ms_str(solve.time_ms)
+    return ms_str(solve.time_ms)
 
 def ms_str(ms):
     if not ms:
@@ -512,6 +519,7 @@ class SessionWidget(QWidget):
         self.table.setHorizontalHeaderItem(1, cell('ao5'))
         self.table.setHorizontalHeaderItem(2, cell('ao12'))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.cellDoubleClicked.connect(self.edit_solve)
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
@@ -520,6 +528,13 @@ class SessionWidget(QWidget):
         self.layout = layout
 
         self.session_editor = SessionEditorWidget(self)
+        self.solve_editor = SolveEditorWidget(self)
+
+    def edit_solve(self, row, col):
+        solve_id = self.table.item(row, 0).secret_data
+        self.solve_editor.update_solve(solve_id)
+        self.solve_editor.exec()
+        self.trigger_update()
 
     def change_session(self, index):
         with db.get_session() as session:
@@ -631,7 +646,7 @@ class SessionWidget(QWidget):
 
             sesh.cached_stats_current = stats_current
             sesh.cached_stats_best = stats_best
-            solves[0].cached_stats = stats_current
+            solves[0].cached_stats = stats_current.copy()
 
             # Build the table of actual solves
             self.table.setRowCount(len(solves))
@@ -639,13 +654,101 @@ class SessionWidget(QWidget):
             for [i, solve] in enumerate(solves):
                 self.table.setVerticalHeaderItem(i,
                         cell('%s' % (len(solves) - i)))
-                self.table.setItem(i, 0,
-                        cell(ms_str(solve_time(solve))))
+                # HACK: set the secret data so the solve editor gets the ID
+                solve_str = cell(ms_str(solve_time(solve)))
+                solve_str.secret_data = solve.id
+                self.table.setItem(i, 0, solve_str)
                 stats = solve.cached_stats or {}
                 self.table.setItem(i, 1,
                         cell(ms_str(stats.get('ao5'))))
                 self.table.setItem(i, 2,
                         cell(ms_str(stats.get('ao12'))))
+
+class SolveEditorWidget(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept_edits)
+        buttons.rejected.connect(self.reject_edits)
+
+        self.session_label = QLabel()
+        self.time_label = QLabel()
+        self.result_label = QLabel()
+        self.scramble_label = QLabel()
+        self.scramble_label.setWordWrap(True)
+
+        self.dnf = QCheckBox('DNF')
+        self.dnf.stateChanged.connect(lambda v: self.make_edit('dnf', v))
+        self.plus_2 = QCheckBox('+2')
+        self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', v))
+
+        layout = QGridLayout(self)
+        layout.addWidget(QLabel('Session:'), 0, 0)
+        layout.addWidget(self.session_label, 0, 1)
+        layout.addWidget(QLabel('Time:'), 1, 0)
+        layout.addWidget(self.time_label, 1, 1)
+        layout.addWidget(QLabel('Result:'), 2, 0)
+        layout.addWidget(self.result_label, 2, 1)
+        layout.addWidget(QLabel('Scramble:'), 3, 0)
+        layout.addWidget(self.scramble_label, 3, 1)
+        layout.addWidget(self.dnf, 4, 0)
+        layout.addWidget(self.plus_2, 4, 1)
+        layout.addWidget(buttons, 5, 0, 1, 3)
+
+        self.solve_id = None
+        self.edits = {}
+
+    def make_edit(self, key, value):
+        self.edits[key] = bool(value)
+        setattr(self.solve, key, value)
+        self.result_label.setText(solve_time_str(self.solve))
+
+    def update_solve(self, solve_id):
+        self.solve_id = solve_id
+        with db.get_session() as session:
+            solve = session.query_first(db.Solve, id=solve_id)
+
+            solve.session # Attribute access so it still works after make_transient
+            db.make_transient(solve)
+
+            self.solve = solve
+            self.dnf.setChecked(solve.dnf)
+            self.plus_2.setChecked(solve.plus_2)
+            self.session_label.setText(solve.session.name)
+            self.scramble_label.setText(solve.scramble)
+            self.time_label.setText(str(solve.created_at))
+            self.result_label.setText(solve_time_str(solve))
+        self.update()
+
+    def sizeHint(self):
+        return QSize(400, 100)
+
+    def reset(self):
+        self.solve_id = None
+        self.solve = None
+        self.edits = {}
+
+    def accept_edits(self):
+        with db.get_session() as session:
+            # Edit solve
+            solve = session.query_first(db.Solve, id=self.solve_id)
+            for [k, v] in self.edits.items():
+                setattr(solve, k, v)
+
+            # Invalidate statistics on session
+            # XXX might need to invalidate individual solve stats later, but
+            # for now when the 'best' stat cache is cleared it recalculates all
+            # solves
+            solve.session.cached_stats_current = None
+            solve.session.cached_stats_best = None
+
+        self.reset()
+        self.accept()
+
+    def reject_edits(self):
+        self.reset()
+        self.reject()
 
 # Based on https://stackoverflow.com/a/43789304
 class ReorderTableWidget(QTableWidget):

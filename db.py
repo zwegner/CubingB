@@ -66,6 +66,10 @@ class Settings(Base, NiceBase):
     current_session_id = Column(Integer, ForeignKey(CubeSession.id))
     current_session = relationship('CubeSession')
 
+# Make an object usable outside of a DB session
+def make_transient(obj):
+    return sa.orm.session.make_transient(obj)
+
 # Subclass of Session with some convenience functions
 class NiceSession(Session):
     def query_first(self, table, *args, **kwargs):
