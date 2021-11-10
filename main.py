@@ -197,7 +197,7 @@ class CubeWindow(QMainWindow):
         # Any key stops a solve
         elif self.state == State.SOLVING:
             self.state = State.SCRAMBLE
-            self.finish_solve()
+            self.finish_solve(dnf=event.key() == Qt.Key.Key_Escape)
         else:
             event.ignore()
             return
@@ -301,7 +301,7 @@ class CubeWindow(QMainWindow):
         self.timer.timeout.connect(self.update_timer)
         self.timer.start(100)
 
-    def finish_solve(self):
+    def finish_solve(self, dnf=False):
         self.end_time = time.time()
         self.final_time = self.end_time - self.start_time
 
@@ -316,7 +316,7 @@ class CubeWindow(QMainWindow):
             sesh = session.query_first(db.Settings).current_session
             session.insert(db.Solve, session=sesh,
                     scramble=' '.join(self.scramble),
-                    time_ms=int(self.final_time * 1000))
+                    time_ms=int(self.final_time * 1000), dnf=dnf)
 
         self.gen_scramble()
 
