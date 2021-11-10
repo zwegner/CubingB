@@ -9,7 +9,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
-        QAbstractItemView)
+        QAbstractItemView, QHeaderView)
 
 import bluetooth
 import db
@@ -453,6 +453,7 @@ class SessionWidget(QWidget):
         self.table.setHorizontalHeaderItem(0, cell('Time'))
         self.table.setHorizontalHeaderItem(1, cell('ao5'))
         self.table.setHorizontalHeaderItem(2, cell('ao12'))
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
@@ -671,11 +672,14 @@ class SessionEditorWidget(QDialog):
         super().__init__(parent)
 
         self.table = ReorderTableWidget(self, self.rows_reordered)
-        self.table.setColumnCount(2 + len(STAT_AO_COUNTS))
+        self.table.setColumnCount(3 + len(STAT_AO_COUNTS))
         self.table.setHorizontalHeaderItem(0, cell('Name'))
-        self.table.setHorizontalHeaderItem(1, cell('Scramble type'))
+        self.table.setHorizontalHeaderItem(1, cell('Scramble'))
+        self.table.setHorizontalHeaderItem(2, cell('# Solves'))
         for [i, stat] in enumerate(STAT_AO_COUNTS):
-            self.table.setHorizontalHeaderItem(2+i, cell(stat_str(stat)))
+            self.table.setHorizontalHeaderItem(3+i, cell(stat_str(stat)))
+
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
         self.table.itemChanged.connect(self.item_edited)
 
@@ -726,7 +730,7 @@ class SessionEditorWidget(QDialog):
         self.reject()
 
     def sizeHint(self):
-        return QSize(600, 500)
+        return QSize(700, 800)
 
     def update_items(self):
         # Disconnect signals so we don't get spurious edit signals
@@ -735,10 +739,16 @@ class SessionEditorWidget(QDialog):
         self.table.clearContents()
         self.table.setRowCount(0)
         with db.get_session() as session:
-            sessions = session.query_all(db.CubeSession)
-            sessions = list(sorted(sessions, key=session_sort_key))
+            # Get all sessions along with their number of solves. Kinda tricky
+            stmt = (session.query(db.Solve.session_id,
+                    db.sa.func.count('*').label('n_solves'))
+                    .group_by(db.Solve.session_id).subquery())
+            sessions = (session.query(db.CubeSession, stmt.c.n_solves)
+                    .outerjoin(stmt, db.CubeSession.id == stmt.c.session_id).all())
+            sessions = list(sorted(sessions, key=lambda s: session_sort_key(s[0])))
+
             self.table.setRowCount(len(sessions))
-            for [i, sesh] in enumerate(sessions):
+            for [i, [sesh, n_solves]] in enumerate(sessions):
                 stats = sesh.cached_stats_best or {}
                 sesh_id = session_sort_key(sesh)
                 self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
@@ -748,9 +758,10 @@ class SessionEditorWidget(QDialog):
                 name_widget.secret_data = sesh.id
                 self.table.setItem(i, 0, name_widget)
                 self.table.setItem(i, 1, cell(sesh.scramble_type))
+                self.table.setItem(i, 2, cell(str(n_solves)))
                 for [j, stat] in enumerate(STAT_AO_COUNTS):
                     stat = stat_str(stat)
-                    self.table.setItem(i, 2+j,
+                    self.table.setItem(i, 3+j,
                             cell(ms_str(stats.get(stat))))
 
         self.table.blockSignals(False)
