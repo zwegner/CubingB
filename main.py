@@ -436,7 +436,7 @@ class InstructionWidget(QLabel):
 class ScrambleWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
-        self.setStyleSheet('ScrambleWidget { font: 48px Courier; max-height: 100px }')
+        self.setStyleSheet('ScrambleWidget { font: 48px Courier; }')
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setWordWrap(True)
@@ -476,7 +476,7 @@ class ScrambleViewWidget(QFrame):
         layout.addWidget(self.bottom_pic, 1, 1)
 
         self.setStyleSheet('ScrambleViewWidget { background-color: #999; '
-                'font: 24px; max-height: 250px; }')
+                'font: 24px; }')
 
     def set_scramble(self, scramble):
         self.scramble = scramble
