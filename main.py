@@ -122,6 +122,18 @@ def session_sort_key(s):
         return s.sort_id
     return s.id
 
+def make_h_layout(parent, children):
+    layout = QHBoxLayout(parent)
+    for c in children:
+        layout.addWidget(c)
+    return layout
+
+def make_v_layout(parent, children):
+    layout = QVBoxLayout(parent)
+    for c in children:
+        layout.addWidget(c)
+    return layout
+
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
 class CubeWindow(QMainWindow):
@@ -158,8 +170,6 @@ class CubeWindow(QMainWindow):
 
         main = QWidget()
 
-        layout = QHBoxLayout(main)
-        layout.addWidget(self.session_widget)
 
         timer_container = QWidget(main)
         timer_layout = QGridLayout(timer_container)
@@ -169,13 +179,10 @@ class CubeWindow(QMainWindow):
 
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        right_layout = QVBoxLayout(right)
-        right_layout.addWidget(self.instruction_widget)
-        right_layout.addWidget(self.scramble_widget)
-        right_layout.addWidget(self.gl_widget)
-        right_layout.addWidget(timer_container)
-        layout.addWidget(right)
+        make_v_layout(right, [self.instruction_widget, self.scramble_widget,
+                self.gl_widget, timer_container])
 
+        make_h_layout(main, [self.session_widget, right])
         self.setCentralWidget(main)
 
         self.gen_scramble()
@@ -516,13 +523,9 @@ class SessionWidget(QWidget):
         super().__init__(parent)
         self.setStyleSheet('SessionWidget { max-width: 300px; }')
 
-        title = QWidget()
-        title_layout = QHBoxLayout(title)
         self.label = QLabel('Session:')
         self.selector = QComboBox()
         self.selector.currentIndexChanged.connect(self.change_session)
-        title_layout.addWidget(self.label)
-        title_layout.addWidget(self.selector)
 
         self.stats = QWidget()
 
@@ -534,11 +537,9 @@ class SessionWidget(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.cellDoubleClicked.connect(self.edit_solve)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(title)
-        layout.addWidget(self.stats)
-        layout.addWidget(self.table)
-        self.layout = layout
+        title = QWidget()
+        make_h_layout(title, [self.label, self.selector])
+        self.layout = make_v_layout(self, [title, self.stats, self.table])
 
         self.session_editor = SessionEditorWidget(self)
         self.solve_editor = SolveEditorWidget(self)
@@ -849,9 +850,7 @@ class SessionEditorWidget(QDialog):
         button.accepted.connect(self.accept_edits)
         button.rejected.connect(self.reject_edits)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.table)
-        layout.addWidget(button)
+        make_v_layout(self, [self.table, button])
 
         self.name_edits = {}
         self.reorder_edits = {}
