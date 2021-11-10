@@ -547,8 +547,12 @@ class SessionWidget(QWidget):
     def edit_solve(self, row, col):
         solve_id = self.table.item(row, 0).secret_data
         self.solve_editor.update_solve(solve_id)
-        self.solve_editor.exec()
-        self.trigger_update()
+        # Start a DB session here just so we can rollback if the user cancels
+        with db.get_session() as session:
+            if self.solve_editor.exec():
+                self.trigger_update()
+            else:
+                session.rollback()
 
     def change_session(self, index):
         with db.get_session() as session:
@@ -672,8 +676,8 @@ class SolveEditorDialog(QDialog):
         super().__init__(parent)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept_edits)
-        buttons.rejected.connect(self.reject_edits)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
 
         self.session_label = QLabel()
         self.time_label = QLabel()
@@ -700,21 +704,26 @@ class SolveEditorDialog(QDialog):
         layout.addWidget(buttons, 5, 0, 1, 3)
 
         self.solve_id = None
-        self.edits = {}
 
     def make_edit(self, key, value):
-        self.edits[key] = bool(value)
-        setattr(self.solve, key, value)
-        self.result_label.setText(solve_time_str(self.solve))
+        with db.get_session() as session:
+            # Edit solve
+            solve = session.query_first(db.Solve, id=self.solve_id)
+            setattr(solve, key, bool(value))
+
+            self.result_label.setText(solve_time_str(solve))
+
+            # Invalidate statistics on session
+            # XXX might need to invalidate individual solve stats later, but
+            # for now when the 'best' stat cache is cleared it recalculates all
+            # solves
+            solve.session.cached_stats_current = None
+            solve.session.cached_stats_best = None
 
     def update_solve(self, solve_id):
         self.solve_id = solve_id
         with db.get_session() as session:
             solve = session.query_first(db.Solve, id=solve_id)
-
-            solve.session # Attribute access so it still works after make_transient
-            db.make_transient(solve)
-
             self.solve = solve
             self.dnf.setChecked(solve.dnf)
             self.plus_2.setChecked(solve.plus_2)
@@ -726,32 +735,6 @@ class SolveEditorDialog(QDialog):
 
     def sizeHint(self):
         return QSize(400, 100)
-
-    def reset(self):
-        self.solve_id = None
-        self.solve = None
-        self.edits = {}
-
-    def accept_edits(self):
-        with db.get_session() as session:
-            # Edit solve
-            solve = session.query_first(db.Solve, id=self.solve_id)
-            for [k, v] in self.edits.items():
-                setattr(solve, k, v)
-
-            # Invalidate statistics on session
-            # XXX might need to invalidate individual solve stats later, but
-            # for now when the 'best' stat cache is cleared it recalculates all
-            # solves
-            solve.session.cached_stats_current = None
-            solve.session.cached_stats_best = None
-
-        self.reset()
-        self.accept()
-
-    def reject_edits(self):
-        self.reset()
-        self.reject()
 
 # Based on https://stackoverflow.com/a/43789304
 class ReorderTableWidget(QTableWidget):
@@ -845,53 +828,40 @@ class SessionEditorDialog(QDialog):
 
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-        self.table.itemChanged.connect(self.item_edited)
+        self.table.itemChanged.connect(self.edit_name)
 
         button = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button.accepted.connect(self.accept_edits)
-        button.rejected.connect(self.reject_edits)
+        button.rejected.connect(self.reject)
 
         make_v_layout(self, [self.table, button])
 
         self.session_selector = SessionSelectorDialog(self)
 
-        self.name_edits = {}
-        self.reorder_edits = {}
-
-    def item_edited(self, item):
-        self.name_edits[item.secret_data] = item.text()
+    def edit_name(self, item):
+        with db.get_session() as session:
+            sesh = session.query_first(db.CubeSession, id=item.secret_data)
+            sesh.name = item.text()
 
     def rows_reordered(self):
-        # Update sort IDs
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            self.reorder_edits[item.secret_data] = row + 1
+        with db.get_session() as session:
+            for row in range(self.table.rowCount()):
+                item = self.table.item(row, 0)
+                sesh = session.query_first(db.CubeSession, id=item.secret_data)
+                sesh.sort_id = row + 1
+
+        # Rebuild the table so it can get new buttons. We can't easily copy a
+        # widget, so the ReorderTableWidget class just leaves them blank
+        self.update_items()
 
     def accept_edits(self):
         # Make sure to change focus to the window in case the user clicked OK
         # while still editing. Without the focus change, the itemChanged signal
-        # is fired after we accept changes, so we'd lose the last edit, and it
-        # would get silently added to the next edit action
+        # is fired after we accept changes, so the last edit would go in a
+        # separate DB transaction, ugh
         self.setFocus()
 
-        with db.get_session() as session:
-            # Update names
-            for [id, name] in self.name_edits.items():
-                sesh = session.query_first(db.CubeSession, id=id)
-                sesh.name = name
-            self.name_edits = {}
-
-            # Update ordering
-            for [id, sort_id] in self.reorder_edits.items():
-                sesh = session.query_first(db.CubeSession, id=id)
-                sesh.sort_id = sort_id
-            self.reorder_edits = {}
         self.accept()
-
-    def reject_edits(self):
-        self.name_edits = {}
-        self.reorder_edits = {}
-        self.reject()
 
     def sizeHint(self):
         return QSize(700, 800)
