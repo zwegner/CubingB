@@ -9,7 +9,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
-        QAbstractItemView, QHeaderView)
+        QAbstractItemView, QHeaderView, QFrame)
 
 import bluetooth
 import config
@@ -128,6 +128,7 @@ class CubeWindow(QMainWindow):
         # update the view, and it's simpler to just always have them available
         self.gl_widget = GLWidget(self)
         self.scramble_widget = ScrambleWidget(self)
+        self.scramble_view_widget = ScrambleViewWidget(self)
         self.instruction_widget = InstructionWidget(self)
         self.timer_widget = TimerWidget(self)
         self.session_widget = SessionWidget(self)
@@ -140,13 +141,19 @@ class CubeWindow(QMainWindow):
         layout = QHBoxLayout(main)
         layout.addWidget(self.session_widget)
 
+        timer_container = QWidget(main)
+        timer_layout = QGridLayout(timer_container)
+        timer_layout.addWidget(self.timer_widget, 0, 0)
+        timer_layout.addWidget(self.scramble_view_widget, 0, 0,
+                Qt.AlignRight | Qt.AlignTop)
+
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_layout = QVBoxLayout(right)
         right_layout.addWidget(self.instruction_widget)
         right_layout.addWidget(self.scramble_widget)
         right_layout.addWidget(self.gl_widget)
-        right_layout.addWidget(self.timer_widget)
+        right_layout.addWidget(timer_container)
         layout.addWidget(right)
 
         self.setCentralWidget(main)
@@ -177,6 +184,9 @@ class CubeWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_Space and self.state == State.SCRAMBLE:
             self.state = State.SOLVE_PENDING
             self.start_pending()
+        elif event.key() == Qt.Key.Key_Escape and self.state == State.SOLVE_PENDING:
+            self.state = State.SCRAMBLE
+            self.stop_pending(False)
         # Any key stops a solve
         elif self.state == State.SOLVING:
             self.state = State.SCRAMBLE
@@ -208,6 +218,7 @@ class CubeWindow(QMainWindow):
         # Hide things that are only shown conditionally below
         self.gl_widget.hide()
         self.scramble_widget.hide()
+        self.scramble_view_widget.hide()
         self.instruction_widget.hide()
         self.timer_widget.hide()
 
@@ -217,6 +228,7 @@ class CubeWindow(QMainWindow):
 
         if self.state == State.SCRAMBLE:
             self.scramble_widget.show()
+            self.scramble_view_widget.show()
             self.timer_widget.show()
         elif self.state == State.SOLVE_PENDING:
             self.timer_widget.update_time(0, 3)
@@ -240,8 +252,9 @@ class CubeWindow(QMainWindow):
         self.pending_timer.start(int(1000 * TIMER_DEBOUNCE))
 
     def stop_pending(self, pending):
-        self.pending_timer.stop()
-        self.pending_timer = None
+        if self.pending_timer:
+            self.pending_timer.stop()
+            self.pending_timer = None
         self.timer_widget.set_pending(pending)
 
     def set_pending(self):
@@ -319,6 +332,7 @@ class CubeWindow(QMainWindow):
         turns = self.turns[:]
 
         self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
+        self.scramble_view_widget.set_scramble(self.scramble)
         self.gl_widget.set_render_data(cube, turns, self.quat)
 
     # Make a move and update any state for either a scramble or a solve
@@ -389,6 +403,7 @@ class TimerWidget(QLabel):
         super().__init__(parent)
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def set_pending(self, pending):
         color = 'red' if pending else 'black'
@@ -409,7 +424,7 @@ class InstructionWidget(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setWordWrap(True)
 
-# Display the scramble
+# Display the scramble moves
 
 class ScrambleWidget(QLabel):
     def __init__(self, parent):
@@ -431,6 +446,50 @@ class ScrambleWidget(QLabel):
                 left[offset+i] = scramble_left[i]
         self.setText(' '.join('% -2s' % s for s in left))
         self.update()
+
+class ScrambleViewWidget(QFrame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.scramble = None
+        self.last_scramble = None
+
+        # Set up a GL widget to render little scrambled cubes
+        self.gl_widget = GLWidget(self)
+        self.gl_widget.resize(200, 200)
+        self.gl_widget.hide()
+
+        # Build layout for scramble view
+        label = QLabel('Scramble')
+        label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.top_pic = QLabel()
+        self.bottom_pic = QLabel()
+        layout = QGridLayout(self)
+        layout.addWidget(label, 0, 0, 1, 2)
+        layout.addWidget(self.top_pic, 1, 0)
+        layout.addWidget(self.bottom_pic, 1, 1)
+
+        self.setStyleSheet('ScrambleViewWidget { background-color: #999; '
+                'font: 24px; max-height: 250px; }')
+
+    def set_scramble(self, scramble):
+        self.scramble = scramble
+        self.update()
+
+    # Handle the paint event so we can use an OpenGL context to render the
+    # scramble. The scramble can get updated from the bluetooth thread and
+    # we can't render from there.
+    def paintEvent(self, event):
+        if self.scramble is not self.last_scramble:
+            cube = solver.Cube()
+            cube.run_alg(' '.join(self.scramble))
+            for [pic, ax, ay] in [[self.top_pic, 30, 45],
+                    [self.bottom_pic, -30, 225]]:
+                self.gl_widget.set_render_data(cube, [0]*6, [1, 0, 0, 0])
+                self.gl_widget.bg_color = [.6, .6, .6, 1]
+                self.gl_widget.set_ortho(ax, ay)
+                picture = self.gl_widget.grab()
+                pic.setPixmap(picture)
+            self.last_scramble = self.scramble
 
 class SessionWidget(QWidget):
     def __init__(self, parent):
@@ -770,9 +829,15 @@ class SessionEditorWidget(QDialog):
 class GLWidget(QOpenGLWidget):
     def __init__(self, parent):
         super().__init__(parent)
+        self.reset()
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def reset(self):
         self.quat = self.base_quat = [1, 0, 0, 0]
         self.gl_init = False
         self.size = None
+        self.ortho = None
+        self.bg_color = [.1, .1, .1, 1]
 
     def set_render_data(self, cube, turns, quat):
         self.cube = cube
@@ -780,24 +845,30 @@ class GLWidget(QOpenGLWidget):
         self.quat = quat
         self.update()
 
+    def set_ortho(self, ax, ay):
+        self.ortho = [ax, ay]
+
     def initializeGL(self):
         self.gl_init = True
         render.setup()
-        render.set_persective(self.size)
 
-    def resizeEvent(self, event):
-        s = event.size()
-        self.size = [s.width(), s.height()]
-        if self.gl_init:
-            render.set_persective(self.size)
+    def resizeGL(self, w, h):
+        self.size = [w, h]
 
     def paintGL(self):
+        render.BG_COLOR = self.bg_color
         render.reset()
 
-        q = quat_mul(self.base_quat, self.quat)
-        matrix = quat_matrix(quat_normalize(q))
+        if self.ortho is not None:
+            render.set_ortho(self.size, *self.ortho)
+        else:
+            render.set_persective(self.size)
 
-        render.set_rotation(matrix)
+            q = quat_mul(self.base_quat, self.quat)
+            matrix = quat_matrix(quat_normalize(q))
+
+            render.set_rotation(matrix)
+
         render.render_cube(self.cube, self.turns)
 
 if __name__ == '__main__':

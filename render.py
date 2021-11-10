@@ -14,6 +14,8 @@ COLORS = [
     [.1, .1, .1],
 ]
 
+BG_COLOR = [.1, .1, .1, 1]
+
 # How much spacing is between cubies? This is a factor--1.03 == 3% of piece size
 GAP = 1.03
 
@@ -118,8 +120,25 @@ def set_persective(window_size):
     # Switch back to the model matrix stack for rendering
     glMatrixMode(GL_MODELVIEW)
 
+def set_ortho(window_size, ax, ay):
+    # Set up view
+    [w, h] = window_size
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    glViewport(0, 0, w, h)
+    glOrtho(-1, 1, -1, 1, -10, 10)
+    glTranslatef(0, 0, -4)
+
+    # Switch back to the model matrix stack for rendering
+    glMatrixMode(GL_MODELVIEW)
+
+    glLoadIdentity()
+
+    glRotatef(ax, 1, 0, 0)
+    glRotatef(ay, 0, -1, 0)
+
 def reset():
-    glClearColor(.3, .3, .3, 1)
+    glClearColor(*BG_COLOR)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
 def set_rotation(matrix):
