@@ -24,10 +24,11 @@ metadata = sa.MetaData(naming_convention=SQL_NAMING_CONVENTION)
 Base = declarative_base(metadata=metadata)
 
 # Base class of DB tables to add id/created_at/updated_at columns everywhere
+now = text('datetime("now", "localtime")')
 class NiceBase:
     id = Column(Integer, primary_key=True)
-    created_at = Column(DateTime, default=sa.func.now())
-    updated_at = Column(DateTime, default=sa.func.now(), onupdate=sa.func.now())
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
 
     def __init__(self, **kwargs):
         for [k, v] in kwargs.items():
