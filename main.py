@@ -9,7 +9,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
-        QAbstractItemView, QHeaderView, QFrame, QCheckBox)
+        QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton)
 
 import bluetooth
 import config
@@ -541,8 +541,8 @@ class SessionWidget(QWidget):
         make_h_layout(title, [self.label, self.selector])
         self.layout = make_v_layout(self, [title, self.stats, self.table])
 
-        self.session_editor = SessionEditorWidget(self)
-        self.solve_editor = SolveEditorWidget(self)
+        self.session_editor = SessionEditorDialog(self)
+        self.solve_editor = SolveEditorDialog(self)
 
     def edit_solve(self, row, col):
         solve_id = self.table.item(row, 0).secret_data
@@ -561,7 +561,8 @@ class SessionWidget(QWidget):
                 settings.current_session = sesh
             elif id == 'edit':
                 self.session_editor.update_items()
-                self.session_editor.exec()
+                if not self.session_editor.exec():
+                    session.rollback()
             elif id == 'delete':
                 assert 0
             else:
@@ -666,7 +667,7 @@ class SessionWidget(QWidget):
                 self.table.setItem(i, 2,
                         cell(ms_str(stats.get('ao12'))))
 
-class SolveEditorWidget(QDialog):
+class SolveEditorDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
 
@@ -830,12 +831,12 @@ class ReorderTableWidget(QTableWidget):
         return (rect.contains(pos, True) and pos.y() >= rect.center().y() and
                 not self.model().flags(index) & Qt.ItemIsDropEnabled)
 
-class SessionEditorWidget(QDialog):
+class SessionEditorDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
 
         self.table = ReorderTableWidget(self, self.rows_reordered)
-        self.table.setColumnCount(3 + len(STAT_AO_COUNTS))
+        self.table.setColumnCount(4 + len(STAT_AO_COUNTS))
         self.table.setHorizontalHeaderItem(0, cell('Name'))
         self.table.setHorizontalHeaderItem(1, cell('Scramble'))
         self.table.setHorizontalHeaderItem(2, cell('# Solves'))
@@ -851,6 +852,8 @@ class SessionEditorWidget(QDialog):
         button.rejected.connect(self.reject_edits)
 
         make_v_layout(self, [self.table, button])
+
+        self.session_selector = SessionSelectorDialog(self)
 
         self.name_edits = {}
         self.reorder_edits = {}
@@ -893,6 +896,36 @@ class SessionEditorWidget(QDialog):
     def sizeHint(self):
         return QSize(700, 800)
 
+    def merge_sessions(self, session_id):
+        with db.get_session() as session:
+            # Update session selector dialog
+            sesh = session.query_first(db.CubeSession, id=session_id)
+            sessions = (session.query(db.CubeSession).filter(
+                    db.CubeSession.id != session_id).all())
+            sessions = sorted(sessions, key=session_sort_key)
+            self.session_selector.update_data('Merge %s into session:' % sesh.name, 
+                    sessions)
+            # Show dialog and merge sessions if accepted
+            if self.session_selector.exec():
+                # Update solve IDs and delete old session
+                merge_id = self.session_selector.selected_session_id
+                assert session_id != merge_id
+                session.query(db.Solve).filter_by(session_id=session_id).update(
+                        {db.Solve.session_id: merge_id})
+                session.query(db.CubeSession).filter_by(id=session_id).delete()
+
+                # Clear stat cache
+                new_sesh = session.query_first(db.CubeSession, id=merge_id)
+                new_sesh.cached_stats_current = None
+                new_sesh.cached_stats_best = None
+
+                # Update current session if necessary
+                settings = session.query_first(db.Settings)
+                if settings.current_session_id == session_id:
+                    settings.current_session_id = merge_id
+
+                self.update_items()
+
     def update_items(self):
         # Disconnect signals so we don't get spurious edit signals
         self.table.blockSignals(True)
@@ -925,8 +958,49 @@ class SessionEditorWidget(QDialog):
                     stat = stat_str(stat)
                     self.table.setItem(i, 3+j,
                             cell(ms_str(stats.get(stat))))
+                offset = 3 + len(STAT_AO_COUNTS)
+                # Ugh, Python scoping: create a local function to capture the
+                # current session ID
+                def bind_button(s_id):
+                    button = QPushButton('Merge...')
+                    button.pressed.connect(lambda: self.merge_sessions(s_id))
+                    return button
+                self.table.setCellWidget(i, offset+0, bind_button(sesh.id))
 
         self.table.blockSignals(False)
+
+class SessionSelectorDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.label = QLabel('Session:')
+        self.selector = QComboBox()
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept_session)
+        buttons.rejected.connect(self.reject)
+
+        top = QWidget()
+        make_h_layout(top, [self.label, self.selector])
+        make_v_layout(self, [top, buttons])
+
+        self.selected_session = None
+        self.session_ids = {}
+
+    def update_data(self, message, sessions):
+        self.selected_session = None
+
+        self.label.setText(message)
+        self.selector.clear()
+        self.session_ids = {}
+        for [i, s] in enumerate(sessions):
+            self.session_ids[i] = s.id
+            self.selector.addItem(s.name)
+
+    def accept_session(self):
+        i = self.selector.currentIndex()
+        self.selected_session_id = self.session_ids[i]
+        self.accept()
 
 # Display the cube
 
