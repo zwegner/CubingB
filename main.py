@@ -8,7 +8,8 @@ import time
 from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
-        QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox)
+        QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
+        QAbstractItemView)
 
 import bluetooth
 import db
@@ -96,6 +97,11 @@ def cell(text, editable=False):
     if not editable:
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
     return item
+
+def session_sort_key(s):
+    if s.sort_id is not None:
+        return s.sort_id
+    return s.id
 
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
@@ -479,14 +485,15 @@ class SessionWidget(QWidget):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
 
-            # HACK: disconnect the signal handler so we don't trigger a recursive
-            # update
-            self.selector.currentIndexChanged.disconnect(self.change_session)
+            # Block signal handler so we don't trigger a recursive update
+            self.selector.blockSignals(True)
 
             # Set up dropdown
             self.selector.clear()
             self.session_ids = {}
-            for [i, s] in enumerate(session.query_all(db.CubeSession)):
+            sessions = session.query_all(db.CubeSession)
+            sessions = sorted(sessions, key=session_sort_key)
+            for [i, s] in enumerate(sessions):
                 self.session_ids[i] = s.id
                 self.selector.addItem(s.name)
                 if s.id == sesh.id:
@@ -495,8 +502,7 @@ class SessionWidget(QWidget):
                 self.session_ids[self.selector.count()] = cmd
                 self.selector.addItem(cmd.title() + '...')
 
-            # Restore signal handler per hack above
-            self.selector.currentIndexChanged.connect(self.change_session)
+            self.selector.blockSignals(False)
 
             # Get solves
             solves = list(reversed(session.query(db.Solve).filter_by(session=sesh)
@@ -582,17 +588,94 @@ class SessionWidget(QWidget):
                 self.table.setItem(i, 2,
                         cell(ms_str(stats.get('ao12'))))
 
+# Based on https://stackoverflow.com/a/43789304
+class ReorderTableWidget(QTableWidget):
+    def __init__(self, parent, reorder_cb):
+        super().__init__(parent)
+
+        self.reorder_cb = reorder_cb
+
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDragDropOverwriteMode(False)
+        self.setDropIndicatorShown(True)
+
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+
+    def dropEvent(self, event):
+        if not event.isAccepted() and event.source() == self:
+            drop_row = self.get_drop_row(event)
+
+            rows = list(sorted({item.row() for item in self.selectedItems()}))
+
+            # Make a copy of all items in the selected rows. We need to copy
+            # over the wacky hidden attributes we sometimes use, too...
+            def copy_cell(item):
+                cell = QTableWidgetItem(item)
+                cell.secret_data = getattr(item, 'secret_data', None)
+                return cell
+
+            rows_to_move = [[copy_cell(self.item(row, column))
+                    for column in range(self.columnCount())] for row in rows]
+            headers = [copy_cell(self.verticalHeaderItem(row))
+                    for row in rows]
+
+            # Disconnect signals so we don't get spurious edit signals
+            self.blockSignals(True)
+
+            # Remove the old rows
+            for row in reversed(rows):
+                self.removeRow(row)
+                if row < drop_row:
+                    drop_row -= 1
+
+            # Re-insert old items and select them
+            for [row_idx, [row, header]] in enumerate(zip(rows_to_move, headers)):
+                row_idx += drop_row
+                self.insertRow(row_idx)
+                self.setVerticalHeaderItem(row_idx, header)
+                for [column, cell] in enumerate(row):
+                    self.setItem(row_idx, column, cell)
+                    self.item(row_idx, column).setSelected(True)
+
+            self.blockSignals(False)
+
+            # Notify parent of reordering
+            self.reorder_cb()
+
+            event.accept()
+        else:
+            event.ignore()
+
+    def get_drop_row(self, event):
+        index = self.indexAt(event.pos())
+        if not index.isValid():
+            return self.rowCount()
+        return index.row() + 1 if self.is_below(event.pos(), index) else index.row()
+
+    def is_below(self, pos, index):
+        rect = self.visualRect(index)
+        margin = 2
+        if pos.y() - rect.top() < margin:
+            return False
+        elif rect.bottom() - pos.y() < margin:
+            return True
+        return (rect.contains(pos, True) and pos.y() >= rect.center().y() and
+                not self.model().flags(index) & Qt.ItemIsDropEnabled)
+
 class SessionEditorWidget(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(3 + len(STAT_AO_COUNTS))
-        self.table.setHorizontalHeaderItem(0, cell('ID'))
-        self.table.setHorizontalHeaderItem(1, cell('Name'))
-        self.table.setHorizontalHeaderItem(2, cell('Scramble type'))
+        self.table = ReorderTableWidget(self, self.rows_reordered)
+        self.table.setColumnCount(2 + len(STAT_AO_COUNTS))
+        self.table.setHorizontalHeaderItem(0, cell('Name'))
+        self.table.setHorizontalHeaderItem(1, cell('Scramble type'))
         for [i, stat] in enumerate(STAT_AO_COUNTS):
-            self.table.setHorizontalHeaderItem(3+i, cell(stat_str(stat)))
+            self.table.setHorizontalHeaderItem(2+i, cell(stat_str(stat)))
 
         self.table.itemChanged.connect(self.item_edited)
 
@@ -604,10 +687,17 @@ class SessionEditorWidget(QDialog):
         layout.addWidget(self.table)
         layout.addWidget(button)
 
-        self.current_edits = {}
+        self.name_edits = {}
+        self.reorder_edits = {}
 
     def item_edited(self, item):
-        self.current_edits[item.session_id] = item.text()
+        self.name_edits[item.secret_data] = item.text()
+
+    def rows_reordered(self):
+        # Update sort IDs
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            self.reorder_edits[item.secret_data] = row + 1
 
     def accept_edits(self):
         # Make sure to change focus to the window in case the user clicked OK
@@ -617,43 +707,53 @@ class SessionEditorWidget(QDialog):
         self.setFocus()
 
         with db.get_session() as session:
-            for [id, name] in self.current_edits.items():
+            # Update names
+            for [id, name] in self.name_edits.items():
                 sesh = session.query_first(db.CubeSession, id=id)
                 sesh.name = name
-            self.current_edits = {}
+            self.name_edits = {}
+
+            # Update ordering
+            for [id, sort_id] in self.reorder_edits.items():
+                sesh = session.query_first(db.CubeSession, id=id)
+                sesh.sort_id = sort_id
+            self.reorder_edits = {}
         self.accept()
 
     def reject_edits(self):
-        self.current_edits = {}
+        self.name_edits = {}
+        self.reorder_edits = {}
         self.reject()
 
     def sizeHint(self):
         return QSize(600, 500)
 
     def update_items(self):
-        # HACK: disconnect the edit signal
-        self.table.itemChanged.disconnect(self.item_edited)
+        # Disconnect signals so we don't get spurious edit signals
+        self.table.blockSignals(True)
 
         self.table.clearContents()
         self.table.setRowCount(0)
         with db.get_session() as session:
             sessions = session.query_all(db.CubeSession)
+            sessions = list(sorted(sessions, key=session_sort_key))
             self.table.setRowCount(len(sessions))
             for [i, sesh] in enumerate(sessions):
                 stats = sesh.cached_stats_best or {}
-                self.table.setItem(i, 0, cell(str(sesh.id)))
+                sesh_id = session_sort_key(sesh)
+                self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
                 name_widget = cell(sesh.name, editable=True)
                 # Just set an attribute on the cell to pass data around?
                 # Probably not supposed to do this but it works
-                name_widget.session_id = sesh.id
-                self.table.setItem(i, 1, name_widget)
-                self.table.setItem(i, 2, cell(sesh.scramble_type))
+                name_widget.secret_data = sesh.id
+                self.table.setItem(i, 0, name_widget)
+                self.table.setItem(i, 1, cell(sesh.scramble_type))
                 for [j, stat] in enumerate(STAT_AO_COUNTS):
                     stat = stat_str(stat)
-                    self.table.setItem(i, 3+j,
+                    self.table.setItem(i, 2+j,
                             cell(ms_str(stats.get(stat))))
 
-        self.table.itemChanged.connect(self.item_edited)
+        self.table.blockSignals(False)
 
 # Display the cube
 

@@ -37,6 +37,7 @@ class NiceBase:
 # Gotta disambiguate with sqlalchemy Session I guess
 class CubeSession(Base, NiceBase):
     __tablename__ = 'sessions'
+    sort_id = Column(Integer)
     name = Column(String(128))
     scramble_type = Column(String(64))
     cached_stats_current = Column(JSON)
