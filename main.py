@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QAbstractItemView, QHeaderView)
 
 import bluetooth
+import config
 import db
 import render
 import solver
@@ -19,8 +20,6 @@ import solver
 # Constants
 
 WINDOW_SIZE = [1600, 1000]
-
-DB_PATH = 'sqlite:///cubingb.db'
 
 # Should make UI for this
 USE_SMART_CUBE = False
@@ -116,7 +115,7 @@ class CubeWindow(QMainWindow):
         self.pending_timer = None
 
         # Initialize DB and make sure there's a current session
-        db.init_db(DB_PATH)
+        db.init_db(config.DB_PATH)
         with db.get_session() as session:
             settings = session.upsert(db.Settings, {})
             if not settings.current_session:

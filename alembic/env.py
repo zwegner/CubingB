@@ -16,8 +16,8 @@ fileConfig(config.config_file_name)
 # add your model's MetaData object here
 # for 'autogenerate' support
 import db
-import main
-config.set_main_option("sqlalchemy.url", main.DB_PATH)
+import config as cfg
+config.set_main_option("sqlalchemy.url", cfg.DB_PATH)
 config.naming_convention = db.SQL_NAMING_CONVENTION
 target_metadata = db.metadata
 
