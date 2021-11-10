@@ -67,6 +67,19 @@ def quat_matrix(values):
 
 # UI helpers
 
+def calc_ao(solves, start, size):
+    if len(solves) - start < size:
+        mean = None
+    else:
+        times = [solve_time(s) for s in solves[start:start+size]]
+        if size > 1:
+            times.sort()
+            outliers = (size * STAT_OUTLIER_PCT + 99) // 100
+            times = times[outliers:-outliers]
+        mean = sum(times) / len(times)
+
+    return mean
+
 def stat_str(size):
     if size == 1:
         return 'single'
@@ -579,8 +592,8 @@ class SessionWidget(QWidget):
             self.selector.blockSignals(False)
 
             # Get solves
-            solves = list(reversed(session.query(db.Solve).filter_by(session=sesh)
-                    .order_by(db.Solve.created_at).all()))
+            solves = (session.query(db.Solve).filter_by(session=sesh)
+                    .order_by(db.Solve.created_at.desc()).all())
 
             self.table.clearContents()
             self.table.setRowCount(0)
@@ -595,18 +608,6 @@ class SessionWidget(QWidget):
                 return
 
             # Calculate statistics
-            def calc_ao(start, size):
-                if len(solves) - start < size:
-                    mean = None
-                else:
-                    times = [solve_time(s) for s in solves[start:start+size]]
-                    if size > 1:
-                        times.sort()
-                        outliers = (size * STAT_OUTLIER_PCT + 99) // 100
-                        times = times[outliers:-outliers]
-                    mean = sum(times) / len(times)
-
-                return mean
 
             self.stat_grid.addWidget(QLabel('current'), 0, 1)
             self.stat_grid.addWidget(QLabel('best'), 0, 2)
@@ -615,7 +616,7 @@ class SessionWidget(QWidget):
             stats_best = sesh.cached_stats_best or {}
             for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
                 label = stat_str(size)
-                mean = calc_ao(0, size)
+                mean = calc_ao(solves, 0, size)
 
                 # Update best stats, recalculating if necessary. This
                 # recalculation is pretty inefficient, but should rarely
@@ -625,7 +626,7 @@ class SessionWidget(QWidget):
                 if label not in stats_best:
                     best = None
                     for i in range(0, len(solves)):
-                        m = calc_ao(i, size)
+                        m = calc_ao(solves, i, size)
                         # Update rolling cache stats
                         if solves[i].cached_stats is None:
                             solves[i].cached_stats = {}
@@ -900,7 +901,8 @@ class SessionEditorWidget(QDialog):
         self.table.clearContents()
         self.table.setRowCount(0)
         with db.get_session() as session:
-            # Get all sessions along with their number of solves. Kinda tricky
+            # Get all sessions along with their number of solves. Kinda tricky.
+            # We could do len(sesh.solves), but that's real slow
             stmt = (session.query(db.Solve.session_id,
                     db.sa.func.count('*').label('n_solves'))
                     .group_by(db.Solve.session_id).subquery())
