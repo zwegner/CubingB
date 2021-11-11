@@ -27,7 +27,7 @@ WINDOW_SIZE = [1600, 1000]
 USE_SMART_CUBE = False
 
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
-        'SMART_SCRAMBLED SMART_SOLVING')
+        'SMART_SCRAMBLED SMART_SOLVING SMART_VIEWING')
 
 SOLVED_CUBE = solver.Cube()
 
@@ -180,6 +180,8 @@ class CubeWindow(QMainWindow):
     # cares deeply which thread you're using when starting timers etc.
     schedule_fn = pyqtSignal([object])
 
+    playback_events = pyqtSignal([list])
+
     def __init__(self):
         super().__init__()
         self.timer = None
@@ -203,12 +205,12 @@ class CubeWindow(QMainWindow):
         self.instruction_widget = InstructionWidget(self)
         self.timer_widget = TimerWidget(self)
         self.session_widget = SessionWidget(self)
+        self.smart_playback_widget = SmartPlaybackWidget(self)
 
         # Annoying: set this here so it can be overridden
         self.setStyleSheet('TimerWidget { font: 240px Courier; }')
 
         main = QWidget()
-
 
         timer_container = QWidget(main)
         timer_layout = QGridLayout(timer_container)
@@ -218,8 +220,8 @@ class CubeWindow(QMainWindow):
 
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        make_vbox(right, [self.instruction_widget, self.scramble_widget,
-                self.gl_widget, timer_container])
+        make_vbox(right, [self.instruction_widget, self.smart_playback_widget,
+                self.scramble_widget, self.gl_widget, timer_container])
 
         make_hbox(main, [self.session_widget, right])
         self.setCentralWidget(main)
@@ -238,6 +240,7 @@ class CubeWindow(QMainWindow):
         self.setFocusPolicy(Qt.StrongFocus)
 
         self.schedule_fn.connect(self.run_scheduled_fn)
+        self.playback_events.connect(self.play_events)
 
     def run_scheduled_fn(self, fn):
         fn()
@@ -278,12 +281,21 @@ class CubeWindow(QMainWindow):
     def update_timer(self):
         self.timer_widget.update_time(time.time() - self.start_time, 1)
 
+    def playback_solve(self, solve_id):
+        self.state = State.SMART_VIEWING
+        with db.get_session() as session:
+            solve = session.query_first(db.Solve, id=solve_id)
+            self.reset()
+            self.cube.run_alg(solve.scramble)
+            self.smart_playback_widget.update_solve_data(solve.smart_data_raw)
+
     # Change UI modes based on state
     def update_state_ui(self):
         self.mark_changed()
 
         # Hide things that are only shown conditionally below
         self.gl_widget.hide()
+        self.smart_playback_widget.hide()
         self.scramble_widget.hide()
         self.scramble_view_widget.hide()
         self.instruction_widget.hide()
@@ -311,6 +323,9 @@ class CubeWindow(QMainWindow):
             self.gl_widget.show()
         elif self.state == State.SMART_SOLVING:
             self.timer_widget.show()
+        elif self.state == State.SMART_VIEWING:
+            self.smart_playback_widget.show()
+            self.gl_widget.show()
 
     def start_pending(self):
         self.pending_start = time.time()
@@ -352,22 +367,26 @@ class CubeWindow(QMainWindow):
 
         self.mark_changed()
 
-    def start_solve(self):
-        self.start_time = time.time()
-        self.end_time = None
-        self.final_time = None
+    # Initialize some data to record smart solve data. We do this before starting
+    # the actual solve, since that logic only fires once the first turn is completed
+    def prepare_smart_solve(self):
         self.smart_cube_data = None
-        self.smart_ts = 0
-        if self.state == State.SMART_SOLVING:
-            self.smart_cube_data = bytearray()
+        self.smart_cube_data = bytearray()
+
+    def start_solve(self):
         # Start UI timer to update timer view
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
         self.timer.start(100)
 
+        self.start_time = time.time()
+        self.end_time = None
+        self.final_time = None
+
     def finish_solve(self, dnf=False):
         self.end_time = time.time()
         self.final_time = self.end_time - self.start_time
+        self.start_time = None
 
         # Stop UI timer
         if self.timer:
@@ -464,7 +483,7 @@ class CubeWindow(QMainWindow):
         return int((time.time() - self.start_time) * 1000) & 0xFFFF
 
     # XXX for now we use weilong units, 1/36th turns
-    def update_turn(self, face, turn, ts):
+    def update_turn(self, face, turn, ts, mark_changes=True):
         # Add up partial turns
         self.turns[face] += turn
 
@@ -488,9 +507,10 @@ class CubeWindow(QMainWindow):
                 if f != opp and abs(self.turns[f]) > 4:
                     self.turns[f] = 0
 
-        self.mark_changed()
+        if mark_changes:
+            self.mark_changed()
 
-    def update_rotation(self, quat, ts):
+    def update_rotation(self, quat, ts, mark_changes=True):
         # Record data if we're in a solve
         if self.smart_cube_data is not None:
             # Hacky half-float format: truncate the low bytes
@@ -501,6 +521,17 @@ class CubeWindow(QMainWindow):
             self.smart_cube_data.extend(data)
 
         self.quat = quat
+        if mark_changes:
+            self.mark_changed()
+
+    def play_events(self, events):
+        quat = None
+        for [ts, quat, face, turn] in events:
+            if not quat:
+                self.update_turn(face, turn, 0, mark_changes=False)
+        # Only show the last rotation, since they're not incremental
+        if quat:
+            self.update_rotation(quat, 0, mark_changes=False)
         self.mark_changed()
 
 class TimerWidget(QLabel):
@@ -1049,6 +1080,102 @@ class SessionEditorDialog(QDialog):
                 self.table.setCellWidget(i, offset+0, bind_button(sesh.id))
 
         self.table.blockSignals(False)
+
+class SmartPlaybackWidget(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.parent = parent
+
+        self.play_button = QPushButton('Play')
+        self.time_label = QLabel()
+        self.play_button.pressed.connect(self.play_pause)
+
+        make_hbox(self, [self.time_label, self.play_button])
+
+        self.timer = QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.play_event)
+
+        self.events = None
+        self.event_idx = None
+        self.playing = False
+        self.base_time = 0
+        self.base_ts = 0
+
+    def play_pause(self):
+        if self.playing:
+            self.playing = False
+            self.play_button.setText('Play')
+            self.timer.stop()
+            self.base_ts = 0
+        else:
+            self.playing = True
+            self.play_button.setText('Pause')
+            # Get current time and first timestamp so we can keep in sync
+            self.base_time = time.time()
+            if self.event_idx >= len(self.events):
+                self.event_idx = 0
+            self.base_ts = self.events[self.event_idx][0]
+            self.play_event()
+
+    def play_event(self):
+        # Grab all the events that should have happened by this point (at least one)
+        max_ts = self.base_ts + (time.time() - self.base_time) * 1000
+        ts = self.events[self.event_idx][0]
+        events = [self.events[self.event_idx]]
+        self.event_idx += 1
+        while self.event_idx < len(self.events):
+            event = self.events[self.event_idx]
+            if event[0] > max_ts:
+                break
+            events.append(event)
+            self.event_idx += 1
+
+        self.parent.playback_events.emit(events)
+
+        self.time_label.setText(ms_str(ts - self.base_ts))
+
+        if self.playing:
+            # Stop playing if we're done
+            if self.event_idx >= len(self.events):
+                self.playing = False
+                self.timer.stop()
+            # Otherwise, schedule next event
+            else:
+                ts = self.events[self.event_idx][0]
+                diff_ts = ts - self.base_ts
+                if diff_ts < 0:
+                    diff_ts += (2 ** 32) // SMART_TS_RATIO
+                diff_time = (time.time() - self.base_time) * 1000
+                next_time = diff_ts - diff_time
+                self.timer.start(max(0, int(next_time)))
+
+    def update_solve_data(self, solve_data):
+        self.playing = False
+        self.events = []
+        self.event_idx = 0
+
+        # Parse smart solve data into event list
+        [header, *base_quat] = struct.unpack('<Bffff', solve_data[:17])
+        self.parent.gl_widget.base_quat = base_quat
+        data = bytearray(gzip.decompress(solve_data[17:]))
+        while data:
+            [b, ts] = struct.unpack('<BH', data[:3])
+            data = data[3:]
+            if b & 0x80:
+                # Convert lazy half-float to float
+                [a, b, c, d] = struct.unpack('<hhhh', data[:8])
+                full = struct.pack('<8h', 0, a, 0, b, 0, c, 0, d)
+
+                quat = struct.unpack('<ffff', full)
+                data = data[8:]
+                self.events.append((ts, quat, None, None))
+            else:
+                face = b >> 1
+                assert 0 <= face < 6
+                turn = [-1, 1][b & 1]
+                self.events.append((ts, None, face, turn))
 
 class SessionSelectorDialog(QDialog):
     def __init__(self, parent):
