@@ -85,6 +85,26 @@ def calc_ao(solves, start, size):
 
     return mean
 
+def get_ao_str(solves, start, size):
+    if len(solves) - start < size or size == 1:
+        return ''
+    solves = solves[start:start+size]
+    times = [(solve_time(s), s.id) for s in solves]
+    times.sort()
+    outliers = (size * STAT_OUTLIER_PCT + 99) // 100
+    outlier_set = {s_id for [_, s_id] in times[:outliers] + times[-outliers:]}
+    times = [t for [t, _] in times[outliers:-outliers]]
+    mean = sum(times) / len(times)
+
+    result = []
+    for solve in solves:
+        s = ms_str(solve_time(solve))
+        if solve.id in outlier_set:
+            s = '(%s)' % s
+        result.append(s)
+
+    return '%s = %s' % (' '.join(result), ms_str(mean))
+
 def stat_str(size):
     if size == 1:
         return 'single'
@@ -600,16 +620,23 @@ class SessionWidget(QWidget):
 
         self.session_editor = SessionEditorDialog(self)
         self.solve_editor = SolveEditorDialog(self)
+        self.average_viewer = AverageDialog(self)
 
     def edit_solve(self, row, col):
         solve_id = self.table.item(row, 0).secret_data
-        self.solve_editor.update_solve(solve_id)
-        # Start a DB session here just so we can rollback if the user cancels
-        with db.get_session() as session:
-            if self.solve_editor.exec():
-                self.trigger_update()
-            else:
-                session.rollback()
+        # Change behavior based on whether the click is on the single/ao5/ao12
+        if col == 0:
+            self.solve_editor.update_solve(solve_id)
+            # Start a DB session here just so we can rollback if the user cancels
+            with db.get_session() as session:
+                if self.solve_editor.exec():
+                    self.trigger_update()
+                else:
+                    session.rollback()
+        else:
+            n_solves = 5 if col == 1 else 12
+            self.average_viewer.update_solve(solve_id, n_solves)
+            self.average_viewer.exec()
 
     def change_session(self, index):
         with db.get_session() as session:
@@ -783,6 +810,37 @@ class SolveEditorDialog(QDialog):
             self.scramble_label.setText(solve.scramble)
             self.time_label.setText(str(solve.created_at))
             self.result_label.setText(solve_time_str(solve))
+        self.update()
+
+    def sizeHint(self):
+        return QSize(400, 100)
+
+class AverageDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(self.accept)
+
+        self.result_label = QLabel()
+        self.result_label.setWordWrap(True)
+
+        make_grid(self, [
+            [QLabel('Result:'), self.result_label],
+            [buttons],
+        ])
+
+    def update_solve(self, solve_id, n_solves):
+        self.solve_id = solve_id
+        with db.get_session() as session:
+            # Get solves
+            solve = session.query_first(db.Solve, id=solve_id)
+
+            solves = (session.query(db.Solve).filter_by(session=solve.session).filter(
+                    db.Solve.created_at <= solve.created_at)
+                    .order_by(db.Solve.created_at.asc()).limit(n_solves).all())
+
+            self.result_label.setText(get_ao_str(solves, 0, n_solves))
         self.update()
 
     def sizeHint(self):
