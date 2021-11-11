@@ -1260,6 +1260,8 @@ class GLWidget(QOpenGLWidget):
             matrix = quat_matrix(quat_normalize(q))
 
             render.set_rotation(matrix)
+            render.glRotatef(30, 1, 0, 0)
+            render.glRotatef(30, 0, -1, 0)
 
         render.render_cube(self.cube, self.turns)
 
