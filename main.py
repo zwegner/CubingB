@@ -971,7 +971,7 @@ class SessionEditorDialog(QDialog):
 
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-        self.table.itemChanged.connect(self.edit_name)
+        self.table.itemChanged.connect(self.edit_attr)
 
         button = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button.accepted.connect(self.accept_edits)
@@ -981,16 +981,17 @@ class SessionEditorDialog(QDialog):
 
         self.session_selector = SessionSelectorDialog(self)
 
-    def edit_name(self, item):
+    def edit_attr(self, item):
+        [id, attr] = item.secret_data
         with db.get_session() as session:
-            sesh = session.query_first(db.Session, id=item.secret_data)
-            sesh.name = item.text()
+            sesh = session.query_first(db.Session, id=id)
+            setattr(sesh, attr, item.text())
 
     def rows_reordered(self):
         with db.get_session() as session:
             for row in range(self.table.rowCount()):
                 item = self.table.item(row, 0)
-                sesh = session.query_first(db.Session, id=item.secret_data)
+                sesh = session.query_first(db.Session, id=item.secret_data[0])
                 sesh.sort_id = row + 1
 
         # Rebuild the table so it can get new buttons. We can't easily copy a
@@ -1061,11 +1062,13 @@ class SessionEditorDialog(QDialog):
                 sesh_id = session_sort_key(sesh)
                 self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
                 name_widget = cell(sesh.name, editable=True)
+                scramble_widget = cell(sesh.scramble_type, editable=True)
                 # Just set an attribute on the cell to pass data around?
                 # Probably not supposed to do this but it works
-                name_widget.secret_data = sesh.id
+                name_widget.secret_data = (sesh.id, 'name')
+                scramble_widget.secret_data = (sesh.id, 'scramble_type')
                 self.table.setItem(i, 0, name_widget)
-                self.table.setItem(i, 1, cell(sesh.scramble_type))
+                self.table.setItem(i, 1, scramble_widget)
                 self.table.setItem(i, 2, cell(str(n_solves)))
                 for [j, stat] in enumerate(STAT_AO_COUNTS):
                     stat = stat_str(stat)
