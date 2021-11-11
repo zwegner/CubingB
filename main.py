@@ -11,7 +11,8 @@ from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
-        QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton)
+        QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
+        QSlider)
 
 import bluetooth
 import config
@@ -207,11 +208,14 @@ class CubeWindow(QMainWindow):
         self.session_widget = SessionWidget(self)
         self.smart_playback_widget = SmartPlaybackWidget(self)
 
+        self.settings_dialog = SettingsDialog(self)
+
         # Annoying: set this here so it can be overridden
         self.setStyleSheet('TimerWidget { font: 240px Courier; }')
 
         main = QWidget()
 
+        # Create an overlapping widget thingy so the scramble is above the timer
         timer_container = QWidget(main)
         timer_layout = QGridLayout(timer_container)
         timer_layout.addWidget(self.timer_widget, 0, 0)
@@ -224,7 +228,17 @@ class CubeWindow(QMainWindow):
                 self.scramble_widget, self.gl_widget, timer_container])
 
         make_hbox(main, [self.session_widget, right])
-        self.setCentralWidget(main)
+
+        settings_button = QPushButton('Settings')
+        settings_button.pressed.connect(self.settings_dialog.exec)
+
+        # Create another overlapping thingy with the settings button
+        central = QWidget()
+        central_layout = QGridLayout(central)
+        central_layout.addWidget(main, 0, 0)
+        central_layout.addWidget(settings_button, 0, 0, Qt.AlignRight | Qt.AlignTop)
+
+        self.setCentralWidget(central)
 
         self.gen_scramble()
 
@@ -535,6 +549,40 @@ class CubeWindow(QMainWindow):
         if quat:
             self.update_rotation(quat, 0, mark_changes=False)
         self.mark_changed()
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(self.accept)
+
+        # Ugh python scoping etc etc, bind the local axis variable
+        def create(axis):
+            slider = QSlider()
+            slider.setMinimum(-180)
+            slider.setMaximum(180)
+            slider.setMaximum(180)
+
+            # Icky: reach into parent then into gl_widget
+            attr = 'view_rot_%s' % axis
+            slider.setValue(getattr(self.parent.gl_widget, attr))
+
+            slider.setOrientation(Qt.Horizontal)
+            slider.sliderMoved.connect(lambda v: self.update_rotation(axis, v))
+            return slider
+
+        sliders = [[QLabel('Rotation %s:' % axis.upper()), create(axis)]
+                for axis in 'xyz']
+        
+        make_grid(self, sliders + [[buttons]])
+
+    def update_rotation(self, axis, value):
+        # Icky: reach into parent then into gl_widget, then update it
+        attr = 'view_rot_%s' % axis
+        setattr(self.parent.gl_widget, attr, value)
+        self.parent.gl_widget.update()
 
 class TimerWidget(QLabel):
     def __init__(self, parent):
@@ -1164,6 +1212,7 @@ class SmartPlaybackWidget(QWidget):
 
         # Parse smart solve data into event list
         [header, *base_quat] = struct.unpack('<Bffff', solve_data[:17])
+        # Ick, reach into parent, then into gl_widget to set this...
         self.parent.gl_widget.base_quat = base_quat
         data = bytearray(gzip.decompress(solve_data[17:]))
         while data:
@@ -1226,6 +1275,9 @@ class GLWidget(QOpenGLWidget):
 
     def reset(self):
         self.quat = self.base_quat = [1, 0, 0, 0]
+        self.view_rot_x = 30
+        self.view_rot_y = 30
+        self.view_rot_z = 0
         self.gl_init = False
         self.size = None
         self.ortho = None
@@ -1260,8 +1312,10 @@ class GLWidget(QOpenGLWidget):
             matrix = quat_matrix(quat_normalize(q))
 
             render.set_rotation(matrix)
-            render.glRotatef(30, 1, 0, 0)
-            render.glRotatef(30, 0, -1, 0)
+
+            render.glRotatef(self.view_rot_x, 1, 0, 0)
+            render.glRotatef(self.view_rot_y, 0, -1, 0)
+            render.glRotatef(self.view_rot_z, 0, 0, 1)
 
         render.render_cube(self.cube, self.turns)
 
