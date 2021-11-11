@@ -235,6 +235,7 @@ class CubeWindow(QMainWindow):
 
         self.setWindowTitle('CubingB')
         self.setFocus()
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self.schedule_fn.connect(self.run_scheduled_fn)
 
