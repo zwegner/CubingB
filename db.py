@@ -6,7 +6,7 @@ from sqlalchemy import (text, Column, Index, Boolean, DateTime, ForeignKey,
         Integer, String, Text, BLOB)
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, Session, sessionmaker
+from sqlalchemy.orm import relationship, Session as DBSession, sessionmaker
 
 SESSION_MAKER = None
 
@@ -35,19 +35,19 @@ class NiceBase:
             assert k in self.__table__.columns, k
             setattr(self, k, v)
 
-# Gotta disambiguate with sqlalchemy Session I guess
-class CubeSession(Base, NiceBase):
+class Session(Base, NiceBase):
     __tablename__ = 'sessions'
     sort_id = Column(Integer)
     name = Column(String(128))
     scramble_type = Column(String(64))
     cached_stats_current = Column(JSON)
     cached_stats_best = Column(JSON)
+    solves = relationship('Solve')
 
 class Solve(Base, NiceBase):
     __tablename__ = 'solves'
-    session_id = Column(Integer, ForeignKey(CubeSession.id))
-    session = relationship('CubeSession')
+    session_id = Column(Integer, ForeignKey(Session.id))
+    session = relationship('Session', back_populates='solves')
     scramble = Column(Text)
     reconstruction = Column(Text)
     smart_data = Column(JSON)
@@ -64,15 +64,15 @@ Index('solve_session_idx', Solve.session_id, Solve.created_at)
 
 class Settings(Base, NiceBase):
     __tablename__ = 'settings'
-    current_session_id = Column(Integer, ForeignKey(CubeSession.id))
-    current_session = relationship('CubeSession')
+    current_session_id = Column(Integer, ForeignKey(Session.id))
+    current_session = relationship('Session')
 
 # Make an object usable outside of a DB session
 def make_transient(obj):
     return sa.orm.session.make_transient(obj)
 
-# Subclass of Session with some convenience functions
-class NiceSession(Session):
+# Subclass of DBSession with some convenience functions
+class NiceSession(DBSession):
     def query_first(self, table, *args, **kwargs):
         return self.query(table).filter_by(*args, **kwargs).first()
 

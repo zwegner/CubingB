@@ -190,7 +190,7 @@ class CubeWindow(QMainWindow):
         with db.get_session() as session:
             settings = session.upsert(db.Settings, {})
             if not settings.current_session:
-                sesh = session.insert(db.CubeSession, name='New Session',
+                sesh = session.insert(db.Session, name='New Session',
                         scramble_type='3x3')
                 settings.current_session = sesh
 
@@ -644,7 +644,7 @@ class SessionWidget(QWidget):
 
             id = self.session_ids[index]
             if id == 'new':
-                sesh = session.insert(db.CubeSession, name='New Session',
+                sesh = session.insert(db.Session, name='New Session',
                         scramble_type='3x3')
                 settings.current_session = sesh
             elif id == 'edit':
@@ -654,7 +654,7 @@ class SessionWidget(QWidget):
             elif id == 'delete':
                 assert 0
             else:
-                settings.current_session = session.query_first(db.CubeSession, id=id)
+                settings.current_session = session.query_first(db.Session, id=id)
             session.flush()
             self.trigger_update()
 
@@ -668,7 +668,7 @@ class SessionWidget(QWidget):
             # Set up dropdown
             self.selector.clear()
             self.session_ids = {}
-            sessions = session.query_all(db.CubeSession)
+            sessions = session.query_all(db.Session)
             sessions = sorted(sessions, key=session_sort_key)
             for [i, s] in enumerate(sessions):
                 self.session_ids[i] = s.id
@@ -950,14 +950,14 @@ class SessionEditorDialog(QDialog):
 
     def edit_name(self, item):
         with db.get_session() as session:
-            sesh = session.query_first(db.CubeSession, id=item.secret_data)
+            sesh = session.query_first(db.Session, id=item.secret_data)
             sesh.name = item.text()
 
     def rows_reordered(self):
         with db.get_session() as session:
             for row in range(self.table.rowCount()):
                 item = self.table.item(row, 0)
-                sesh = session.query_first(db.CubeSession, id=item.secret_data)
+                sesh = session.query_first(db.Session, id=item.secret_data)
                 sesh.sort_id = row + 1
 
         # Rebuild the table so it can get new buttons. We can't easily copy a
@@ -979,9 +979,9 @@ class SessionEditorDialog(QDialog):
     def merge_sessions(self, session_id):
         with db.get_session() as session:
             # Update session selector dialog
-            sesh = session.query_first(db.CubeSession, id=session_id)
-            sessions = (session.query(db.CubeSession).filter(
-                    db.CubeSession.id != session_id).all())
+            sesh = session.query_first(db.Session, id=session_id)
+            sessions = (session.query(db.Session).filter(
+                    db.Session.id != session_id).all())
             sessions = sorted(sessions, key=session_sort_key)
             self.session_selector.update_data('Merge %s into session:' % sesh.name, 
                     sessions)
@@ -992,10 +992,10 @@ class SessionEditorDialog(QDialog):
                 assert session_id != merge_id
                 session.query(db.Solve).filter_by(session_id=session_id).update(
                         {db.Solve.session_id: merge_id})
-                session.query(db.CubeSession).filter_by(id=session_id).delete()
+                session.query(db.Session).filter_by(id=session_id).delete()
 
                 # Clear stat cache
-                new_sesh = session.query_first(db.CubeSession, id=merge_id)
+                new_sesh = session.query_first(db.Session, id=merge_id)
                 new_sesh.cached_stats_current = None
                 new_sesh.cached_stats_best = None
 
@@ -1018,8 +1018,8 @@ class SessionEditorDialog(QDialog):
             stmt = (session.query(db.Solve.session_id,
                     db.sa.func.count('*').label('n_solves'))
                     .group_by(db.Solve.session_id).subquery())
-            sessions = (session.query(db.CubeSession, stmt.c.n_solves)
-                    .outerjoin(stmt, db.CubeSession.id == stmt.c.session_id).all())
+            sessions = (session.query(db.Session, stmt.c.n_solves)
+                    .outerjoin(stmt, db.Session.id == stmt.c.session_id).all())
             sessions = list(sorted(sessions, key=lambda s: session_sort_key(s[0])))
 
             self.table.setRowCount(len(sessions))
