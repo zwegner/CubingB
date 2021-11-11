@@ -868,9 +868,10 @@ class AverageDialog(QDialog):
             # Get solves
             solve = session.query_first(db.Solve, id=solve_id)
 
-            solves = (session.query(db.Solve).filter_by(session=solve.session).filter(
-                    db.Solve.created_at <= solve.created_at)
-                    .order_by(db.Solve.created_at.asc()).limit(n_solves).all())
+            solves = (session.query(db.Solve).filter_by(session=solve.session)
+                    .filter(db.Solve.created_at <= solve.created_at)
+                    .order_by(db.Solve.created_at.desc()).limit(n_solves).all())
+            solves = solves[::-1]
 
             self.result_label.setText(get_ao_str(solves, 0, n_solves))
         self.update()
