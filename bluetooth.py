@@ -9,7 +9,7 @@ import PyObjCTools.AppHelper
 U = Foundation.CBUUID.UUIDWithString_
 
 FACE_MAP = [1, 3, 5, 2, 4, 0]
-TURN_MAP = {220: -1, 36: 1}
+TURN_MAP = {-36: -1, 36: 1}
 
 # ObjC class to connect to a bluetooth cube and parse messages
 class WeilongAIDelegate:
@@ -72,19 +72,23 @@ class WeilongAIDelegate:
             for m in range(value[0]):
                 start = 1 + m*6
                 packet = value[start:start+6]
-                face = FACE_MAP[packet[4]]
-                turn = TURN_MAP[packet[5]]
+                [ts, face, turn] = struct.unpack('>Ibb', packet)
+                face = FACE_MAP[face]
+                turn = TURN_MAP[turn]
 
-                self.handler.update_turn(face, turn)
+                self.handler.update_turn(face, turn, ts)
 
         # Gyroscope rotation messages
         elif char == '1004':
-            [_, *values] = struct.unpack('<Iffff', value)
+            # Here's a fun tidbit about the packet format: the timestamps
+            # are big endian and the quaternion floats are little endian
+            [ts] = struct.unpack('>I', value[:4])
+            values = struct.unpack('<ffff', value[4:])
             # Fix up quaternion values. Not totally sure why this is necessary:
             [w, x, y, z] = values
             quat = [w, x, -z, y]
 
-            self.handler.update_rotation(quat)
+            self.handler.update_rotation(quat, ts)
 
 def init_bluetooth(handler):
     objc.setVerbose(1)

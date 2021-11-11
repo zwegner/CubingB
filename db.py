@@ -3,7 +3,7 @@ import threading
 
 import sqlalchemy as sa
 from sqlalchemy import (text, Column, Index, Boolean, DateTime, ForeignKey,
-        Integer, String, Text)
+        Integer, String, Text, BLOB)
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Session, sessionmaker
@@ -51,6 +51,7 @@ class Solve(Base, NiceBase):
     scramble = Column(Text)
     reconstruction = Column(Text)
     smart_data = Column(JSON)
+    smart_data_raw = Column(BLOB)
     notes = Column(Text)
     time_ms = Column(Integer)
     dnf = Column(Boolean, default=False)

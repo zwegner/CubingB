@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import copy
 import enum
+import gzip
 import random
+import struct
 import sys
 import time
 
@@ -35,6 +37,9 @@ STAT_OUTLIER_PCT = 5
 TIMER_DEBOUNCE = .5
 
 INF = float('+inf')
+
+# Basic header to support future metadata/versioning/etc for smart data
+SMART_DATA_HEADER = [1]
 
 # Quaternion helper functions
 
@@ -316,6 +321,10 @@ class CubeWindow(QMainWindow):
         self.start_time = time.time()
         self.end_time = None
         self.final_time = None
+        self.smart_cube_data = None
+        self.smart_ts = 0
+        if self.state == State.SMART_SOLVING:
+            self.smart_cube_data = bytearray()
         # Start UI timer to update timer view
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
@@ -334,9 +343,18 @@ class CubeWindow(QMainWindow):
         # Update database
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
+            # Create data blob, with header, base rotation, and compressed solve data
+            data = None
+            if self.smart_cube_data:
+                data = gzip.compress(self.smart_cube_data, compresslevel=5)
+                base_quat = struct.pack('<ffff', *self.gl_widget.base_quat)
+                data = bytes(SMART_DATA_HEADER) + base_quat + data
+                print('smart:', len(self.smart_cube_data), len(data))
+
             session.insert(db.Solve, session=sesh,
                     scramble=' '.join(self.scramble),
-                    time_ms=int(self.final_time * 1000), dnf=dnf)
+                    time_ms=int(self.final_time * 1000), dnf=dnf,
+                    smart_data_raw=data)
 
         self.gen_scramble()
 
@@ -349,6 +367,7 @@ class CubeWindow(QMainWindow):
         self.cube = solver.Cube()
         self.turns = [0] * 6
         self.quat = [1, 0, 0, 0]
+        self.smart_cube_data = None
 
     # Notify the cube widget that we've updated. We copy all the rendering
     # data to a new object so it can pick up a consistent view at its leisure
@@ -376,8 +395,10 @@ class CubeWindow(QMainWindow):
                 s_turn = (s_turn - turn) % 4
                 if not s_turn:
                     self.scramble_left.pop(0)
+                    # Done scrambling: start recording data
                     if not self.scramble_left:
                         self.state = State.SMART_SCRAMBLED
+                        self.schedule_fn.emit(self.prepare_smart_solve)
                 else:
                     new_turn = solver.TURN_STR[s_turn]
                     self.scramble_left[0] = face + new_turn
@@ -400,10 +421,23 @@ class CubeWindow(QMainWindow):
         if self.state != old_state:
             self.schedule_fn.emit(self.update_state_ui)
 
+    # Get a 16-bit timestamp in milliseconds for recording smart solve events.
+    # The timestamps in the messages seem pretty wonky, so this is more robust
+    def get_ts(self):
+        if self.start_time is None:
+            return 0
+        return int((time.time() - self.start_time) * 1000) & 0xFFFF
+
     # XXX for now we use weilong units, 1/36th turns
-    def update_turn(self, face, turn):
+    def update_turn(self, face, turn, ts):
         # Add up partial turns
         self.turns[face] += turn
+
+        # Record data if we're in a solve
+        if self.smart_cube_data is not None:
+            turn_byte = face * 2 + {-1: 0, 1: 1}[turn]
+            data = struct.pack('<BH', turn_byte, self.get_ts())
+            self.smart_cube_data.extend(data)
 
         # 9 incremental turns make a full quarter turn
         if abs(self.turns[face]) >= 9:
@@ -421,7 +455,16 @@ class CubeWindow(QMainWindow):
 
         self.mark_changed()
 
-    def update_rotation(self, quat):
+    def update_rotation(self, quat, ts):
+        # Record data if we're in a solve
+        if self.smart_cube_data is not None:
+            # Hacky half-float format: truncate the low bytes
+            qdata = struct.pack('<ffff', *quat)
+            qdata = [b for [i, b] in enumerate(qdata) if i & 2]
+
+            data = struct.pack('<BH8B', 0xFF, self.get_ts(), *qdata)
+            self.smart_cube_data.extend(data)
+
         self.quat = quat
         self.mark_changed()
 
