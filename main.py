@@ -249,8 +249,10 @@ class CubeWindow(QMainWindow):
         return QSize(*WINDOW_SIZE)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_R:
+        if event.key() == Qt.Key.Key_C:
             self.gl_widget.base_quat = quat_invert(self.gl_widget.quat)
+        elif event.key() == Qt.Key.Key_R:
+            self.reset()
         elif event.key() == Qt.Key.Key_Space and self.state == State.SCRAMBLE:
             self.state = State.SOLVE_PENDING
             self.start_pending()
