@@ -127,16 +127,30 @@ def session_sort_key(s):
         return s.sort_id
     return s.id
 
-def make_h_layout(parent, children):
+def make_hbox(parent, children):
     layout = QHBoxLayout(parent)
     for c in children:
         layout.addWidget(c)
     return layout
 
-def make_v_layout(parent, children):
+def make_vbox(parent, children):
     layout = QVBoxLayout(parent)
     for c in children:
         layout.addWidget(c)
+    return layout
+
+def make_grid(parent, table):
+    layout = QGridLayout(parent)
+    width = max(len(row) for row in table)
+    for [i, row] in enumerate(table):
+        # Not enough items in the row: assume one cell spanning the whole width
+        if len(row) != width:
+            [cell] = row
+            layout.addWidget(cell, i, 0, 1, width)
+        else:
+            for [j, cell] in enumerate(row):
+                if cell is not None:
+                    layout.addWidget(cell, i, j)
     return layout
 
 # Giant main class that handles the main window, receives bluetooth messages,
@@ -184,10 +198,10 @@ class CubeWindow(QMainWindow):
 
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        make_v_layout(right, [self.instruction_widget, self.scramble_widget,
+        make_vbox(right, [self.instruction_widget, self.scramble_widget,
                 self.gl_widget, timer_container])
 
-        make_h_layout(main, [self.session_widget, right])
+        make_hbox(main, [self.session_widget, right])
         self.setCentralWidget(main)
 
         self.gen_scramble()
@@ -533,10 +547,10 @@ class ScrambleViewWidget(QFrame):
         label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.top_pic = QLabel()
         self.bottom_pic = QLabel()
-        layout = QGridLayout(self)
-        layout.addWidget(label, 0, 0, 1, 2)
-        layout.addWidget(self.top_pic, 1, 0)
-        layout.addWidget(self.bottom_pic, 1, 1)
+        make_grid(self, [
+            [label],
+            [self.top_pic, self.bottom_pic],
+        ])
 
         self.setStyleSheet('ScrambleViewWidget { background-color: #999; '
                 'font: 24px; }')
@@ -581,8 +595,8 @@ class SessionWidget(QWidget):
         self.table.cellDoubleClicked.connect(self.edit_solve)
 
         title = QWidget()
-        make_h_layout(title, [self.label, self.selector])
-        self.layout = make_v_layout(self, [title, self.stats, self.table])
+        make_hbox(title, [self.label, self.selector])
+        self.layout = make_vbox(self, [title, self.stats, self.table])
 
         self.session_editor = SessionEditorDialog(self)
         self.solve_editor = SolveEditorDialog(self)
@@ -647,10 +661,9 @@ class SessionWidget(QWidget):
             self.table.clearContents()
             self.table.setRowCount(0)
 
-            # Clear the stats in an annoying way
+            # Clear the stats
             self.layout.removeWidget(self.stats)
             self.stats = QWidget()
-            self.stat_grid = QGridLayout(self.stats)
             self.layout.insertWidget(1, self.stats)
 
             if not solves:
@@ -658,8 +671,7 @@ class SessionWidget(QWidget):
 
             # Calculate statistics
 
-            self.stat_grid.addWidget(QLabel('current'), 0, 1)
-            self.stat_grid.addWidget(QLabel('best'), 0, 2)
+            stat_table = [[None, QLabel('current'), QLabel('best')]]
 
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
@@ -690,9 +702,10 @@ class SessionWidget(QWidget):
                         best = stats_best[label] = mean
 
                 i = stat_idx + 1
-                self.stat_grid.addWidget(QLabel(label), i, 0)
-                self.stat_grid.addWidget(QLabel(ms_str(mean)), i, 1)
-                self.stat_grid.addWidget(QLabel(ms_str(best)), i, 2)
+                stat_table.append([QLabel(label), QLabel(ms_str(mean)),
+                        QLabel(ms_str(best))])
+
+            make_grid(self.stats, stat_table)
 
             sesh.cached_stats_current = stats_current
             sesh.cached_stats_best = stats_best
@@ -733,18 +746,14 @@ class SolveEditorDialog(QDialog):
         self.plus_2 = QCheckBox('+2')
         self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', v))
 
-        layout = QGridLayout(self)
-        layout.addWidget(QLabel('Session:'), 0, 0)
-        layout.addWidget(self.session_label, 0, 1)
-        layout.addWidget(QLabel('Time:'), 1, 0)
-        layout.addWidget(self.time_label, 1, 1)
-        layout.addWidget(QLabel('Result:'), 2, 0)
-        layout.addWidget(self.result_label, 2, 1)
-        layout.addWidget(QLabel('Scramble:'), 3, 0)
-        layout.addWidget(self.scramble_label, 3, 1)
-        layout.addWidget(self.dnf, 4, 0)
-        layout.addWidget(self.plus_2, 4, 1)
-        layout.addWidget(buttons, 5, 0, 1, 3)
+        make_grid(self, [
+            [QLabel('Session:'), self.session_label],
+            [QLabel('Time:'), self.time_label],
+            [QLabel('Result:'), self.result_label],
+            [QLabel('Scramble:'), self.scramble_label],
+            [self.dnf, self.plus_2],
+            [buttons],
+        ])
 
         self.solve_id = None
 
@@ -877,7 +886,7 @@ class SessionEditorDialog(QDialog):
         button.accepted.connect(self.accept_edits)
         button.rejected.connect(self.reject)
 
-        make_v_layout(self, [self.table, button])
+        make_vbox(self, [self.table, button])
 
         self.session_selector = SessionSelectorDialog(self)
 
@@ -994,8 +1003,8 @@ class SessionSelectorDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         top = QWidget()
-        make_h_layout(top, [self.label, self.selector])
-        make_v_layout(self, [top, buttons])
+        make_hbox(top, [self.label, self.selector])
+        make_vbox(self, [top, buttons])
 
         self.selected_session = None
         self.session_ids = {}
