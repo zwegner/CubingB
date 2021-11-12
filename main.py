@@ -1424,11 +1424,12 @@ class GLWidget(QOpenGLWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def reset(self):
+        self.gl_init = False
         self.quat = self.base_quat = [1, 0, 0, 0]
+        self.zoom = -4
         self.view_rot_x = 30
         self.view_rot_y = 30
         self.view_rot_z = 0
-        self.gl_init = False
         self.size = None
         self.ortho = None
         self.drag_start_vector = None
@@ -1460,7 +1461,7 @@ class GLWidget(QOpenGLWidget):
         if self.ortho is not None:
             render.set_ortho(self.size, *self.ortho)
         else:
-            render.set_persective(self.size)
+            render.set_persective(self.size, self.zoom)
 
             q = quat_mul(self.cam_quat, self.cam_base)
             matrix = quat_matrix(quat_normalize(q))
@@ -1501,6 +1502,12 @@ class GLWidget(QOpenGLWidget):
     def mouseReleaseEvent(self, event):
         # Just multiply the current base
         self.cam_base = quat_normalize(quat_mul(self.cam_quat, self.cam_base))
+
+    def wheelEvent(self, event):
+        delta = -event.pixelDelta().y()
+        self.zoom *= 1.002 ** delta
+        self.zoom = min(-1, max(-25, self.zoom))
+        self.update()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

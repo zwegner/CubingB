@@ -108,14 +108,14 @@ def setup():
     glEnable(GL_POLYGON_SMOOTH)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-def set_persective(window_size):
+def set_persective(window_size, zoom):
     # Set up view
     [w, h] = window_size
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
     glViewport(0, 0, w, h)
     gluPerspective(40, (w / h), 0.1, 50.0)
-    glTranslatef(0, 0, -4)
+    glTranslatef(0, 0, zoom)
 
     # Switch back to the model matrix stack for rendering
     glMatrixMode(GL_MODELVIEW)
