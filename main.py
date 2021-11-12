@@ -213,9 +213,11 @@ class SmartSolve:
         # Parse smart solve data into event list
         events = []
         data = bytearray(gzip.decompress(data[39:]))
+        ts = 0
         while data:
-            [b, ts] = struct.unpack('<BH', data[:3])
+            [b, ts_delta] = struct.unpack('<BH', data[:3])
             data = data[3:]
+            ts += ts_delta
             if b & 0x80:
                 # Convert lazy half-float to float
                 [a, b, c, d] = struct.unpack('<4H', data[:8])
@@ -491,6 +493,7 @@ class CubeWindow(QMainWindow):
         self.smart_start_turns = self.turns.copy()
 
         self.smart_start_quat = self.quat
+        self.last_ts = 0
 
     def start_solve(self):
         self.start_time = time.time()
@@ -615,7 +618,14 @@ class CubeWindow(QMainWindow):
     def get_ts(self):
         if self.start_time is None:
             return 0
-        return int((time.time() - self.start_time) * 1000) & 0xFFFF
+        # Only encode timestamp deltas for slightly better compressibility and
+        # so we don't have to care about overflows. OK if someone pauses for
+        # 2^16 milliseconds (64 seconds) during a solve it can overflow, but
+        # I hope they don't need a smart cube to tell them to not do that
+        ts = int((time.time() - self.start_time) * 1000)
+        result = (ts - self.last_ts) & 0xFFFF
+        self.last_ts = ts
+        return result
 
     # XXX for now we use weilong units, 1/36th turns
     def update_turn(self, face, turn, ts):
