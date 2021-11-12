@@ -59,6 +59,11 @@ class Cube:
         return (self.centers == other.centers and self.edges == other.edges and
                 self.corners == other.corners)
 
+    # To make a copy, just return a new cube object with the same attributes,
+    # since they're all immutable
+    def copy(self):
+        return Cube(self.centers, self.edges, self.corners)
+
 # Metabrogramming. Generate function for each of the turn and rotate moves.
 # This is pretty messy code, just the first random crap I hacked up that worked
 TURNS = []

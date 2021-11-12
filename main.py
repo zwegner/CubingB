@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import copy
 import enum
 import gzip
 import random
@@ -128,7 +127,7 @@ def solve_time_str(solve):
     return ms_str(solve.time_ms)
 
 def ms_str(ms):
-    if not ms:
+    if ms is None:
         return '-'
     if ms == INF:
         return 'DNF'
@@ -160,7 +159,7 @@ def make_vbox(parent, children):
         layout.addWidget(c)
     return layout
 
-def make_grid(parent, table):
+def make_grid(parent, table, stretch=None, widths=None):
     layout = QGridLayout(parent)
     width = max(len(row) for row in table)
     for [i, row] in enumerate(table):
@@ -172,7 +171,85 @@ def make_grid(parent, table):
             for [j, cell] in enumerate(row):
                 if cell is not None:
                     layout.addWidget(cell, i, j)
+    if stretch:
+        for [i, s] in enumerate(stretch):
+            layout.setColumnStretch(i, s)
+    if widths:
+        for [i, w] in enumerate(widths):
+            layout.setColumnMinimumWidth(i, w)
     return layout
+
+# Smart cube analysis stuff
+
+# This class is basically a bigass constructor
+class SmartSolve:
+    def __init__(self, solve, solve_nb):
+        data = solve.smart_data_raw
+        # Parse smart solve data into event list
+        [header, *base_quat] = struct.unpack('<Bffff', data[:17])
+        events = []
+        data = bytearray(gzip.decompress(data[17:]))
+        while data:
+            [b, ts] = struct.unpack('<BH', data[:3])
+            data = data[3:]
+            if b & 0x80:
+                # Convert lazy half-float to float
+                [a, b, c, d] = struct.unpack('<4H', data[:8])
+                M = 0x8000
+                full = struct.pack('<8H', M, a, M, b, M, c, M, d)
+
+                quat = struct.unpack('<ffff', full)
+                data = data[8:]
+                events.append((ts, quat, None, None))
+            else:
+                face = b >> 1
+                assert 0 <= face < 6
+                turn = [-1, 1][b & 1]
+                events.append((ts, None, face, turn))
+
+        # Create an updated list of events, where after each full turn the event
+        # contains a new copy of a cube (like keyframes in videos for easy scrubbing).
+        # index XXX figure out how to merge this with code in CubeWindow
+        # without making a big mess of overabstraction
+        cube = solver.Cube()
+        cube.run_alg(solve.scramble)
+        turns = [0] * 6
+        new_events = [[0, cube, turns.copy(), None, None, None]]
+        # Variables to track what the cube/turns were before an event
+        for [i, [ts, quat, face, turn]] in enumerate(events):
+            # Add the updated event
+            new_events.append([ts, None, None, quat, face, turn])
+
+            if face is not None:
+                turns[face] += turn
+
+                # 9 incremental turns make a full quarter turn
+                if abs(turns[face]) >= 9:
+                    turn = turns[face] // 9
+
+                    # Zero out everything but the opposite face as a sanity
+                    # check. Use a threshold so that a partial turn doesn't
+                    # mess up later turn accounting (if the turning is choppy,
+                    # say, one turn might start before the last completes)
+                    opp = face ^ 1
+                    for f in range(6):
+                        if f != opp and abs(turns[f]) > 4:
+                            turns[f] = 0
+
+                    alg = solver.FACE_STR[face] + solver.TURN_STR[turn]
+
+                    turns = turns.copy()
+                    cube = cube.copy()
+                    cube.run_alg(alg)
+
+                    # Copy the new cube/turns to an event if they just changed
+                    new_events.append([ts, cube, turns.copy(), None, None, None])
+
+        self.scramble = solve.scramble
+        self.base_quat = base_quat
+        self.events = new_events
+        self.solve_nb = solve_nb
+        self.session_name = solve.session.name
 
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
@@ -180,6 +257,7 @@ class CubeWindow(QMainWindow):
     # Signal to just run a specified function in a Qt thread, since Qt really
     # cares deeply which thread you're using when starting timers etc.
     schedule_fn = pyqtSignal([object])
+    schedule_fn_args = pyqtSignal([object, object])
 
     playback_events = pyqtSignal([list])
 
@@ -254,10 +332,14 @@ class CubeWindow(QMainWindow):
         self.setFocusPolicy(Qt.StrongFocus)
 
         self.schedule_fn.connect(self.run_scheduled_fn)
+        self.schedule_fn_args.connect(self.run_scheduled_fn_args)
         self.playback_events.connect(self.play_events)
 
     def run_scheduled_fn(self, fn):
         fn()
+
+    def run_scheduled_fn_args(self, fn, args):
+        fn(*args)
 
     def sizeHint(self):
         return QSize(*WINDOW_SIZE)
@@ -296,14 +378,6 @@ class CubeWindow(QMainWindow):
 
     def update_timer(self):
         self.timer_widget.update_time(time.time() - self.start_time, 1)
-
-    def playback_solve(self, solve_id):
-        self.state = State.SMART_VIEWING
-        with db.get_session() as session:
-            solve = session.query_first(db.Solve, id=solve_id)
-            self.reset()
-            self.cube.run_alg(solve.scramble)
-            self.smart_playback_widget.update_solve_data(solve.smart_data_raw)
 
     # Change UI modes based on state
     def update_state_ui(self):
@@ -444,7 +518,7 @@ class CubeWindow(QMainWindow):
     def mark_changed(self):
         # XXX copy only the stuff that's modified in place. Don't introduce
         # bugs here later OK
-        cube = copy.deepcopy(self.cube)
+        cube = self.cube.copy()
         turns = self.turns[:]
 
         self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
@@ -499,7 +573,7 @@ class CubeWindow(QMainWindow):
         return int((time.time() - self.start_time) * 1000) & 0xFFFF
 
     # XXX for now we use weilong units, 1/36th turns
-    def update_turn(self, face, turn, ts, mark_changes=True):
+    def update_turn(self, face, turn, ts):
         # Add up partial turns
         self.turns[face] += turn
 
@@ -523,10 +597,9 @@ class CubeWindow(QMainWindow):
                 if f != opp and abs(self.turns[f]) > 4:
                     self.turns[f] = 0
 
-        if mark_changes:
-            self.mark_changed()
+        self.mark_changed()
 
-    def update_rotation(self, quat, ts, mark_changes=True):
+    def update_rotation(self, quat, ts):
         # Record data if we're in a solve
         if self.smart_cube_data is not None:
             # Hacky half-float format: truncate the low bytes
@@ -537,18 +610,33 @@ class CubeWindow(QMainWindow):
             self.smart_cube_data.extend(data)
 
         self.quat = quat
-        if mark_changes:
-            self.mark_changed()
+        self.mark_changed()
 
     def play_events(self, events):
         quat = None
-        for [ts, quat, face, turn] in events:
-            if not quat:
-                self.update_turn(face, turn, 0, mark_changes=False)
+        for [ts, cube, turns, quat, face, turn] in events:
+            if cube:
+                self.cube = cube.copy()
+                self.turns = turns.copy()
+            if face is not None:
+                self.turns[face] += turn
         # Only show the last rotation, since they're not incremental
         if quat:
-            self.update_rotation(quat, 0, mark_changes=False)
+            self.quat = quat
         self.mark_changed()
+
+    def start_playback(self, solve_id, solve_nb):
+        self.state = State.SMART_VIEWING
+        with db.get_session() as session:
+            solve = session.query_first(db.Solve, id=solve_id)
+            self.reset()
+            self.smart_playback_widget.update_solve(SmartSolve(solve, solve_nb))
+        self.update_state_ui()
+
+    def stop_playback(self):
+        self.state = State.SCRAMBLING
+        self.reset()
+        self.gen_scramble()
 
 class SettingsDialog(QDialog):
     def __init__(self, parent):
@@ -563,14 +651,13 @@ class SettingsDialog(QDialog):
             slider = QSlider()
             slider.setMinimum(-180)
             slider.setMaximum(180)
-            slider.setMaximum(180)
 
             # Icky: reach into parent then into gl_widget
             attr = 'view_rot_%s' % axis
             slider.setValue(getattr(self.parent.gl_widget, attr))
 
             slider.setOrientation(Qt.Horizontal)
-            slider.sliderMoved.connect(lambda v: self.update_rotation(axis, v))
+            slider.valueChanged.connect(lambda v: self.update_rotation(axis, v))
             return slider
 
         sliders = [[QLabel('Rotation %s:' % axis.upper()), create(axis)]
@@ -849,17 +936,19 @@ class SolveEditorDialog(QDialog):
         self.result_label = QLabel()
         self.scramble_label = QLabel()
         self.scramble_label.setWordWrap(True)
+        self.smart_widget = None
 
         self.dnf = QCheckBox('DNF')
         self.dnf.stateChanged.connect(lambda v: self.make_edit('dnf', v))
         self.plus_2 = QCheckBox('+2')
         self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', v))
 
-        make_grid(self, [
+        self.layout = make_grid(self, [
             [QLabel('Session:'), self.session_label],
             [QLabel('Time:'), self.time_label],
             [QLabel('Result:'), self.result_label],
             [QLabel('Scramble:'), self.scramble_label],
+            [QLabel('Smart data:'), self.smart_widget],
             [self.dnf, self.plus_2],
             [buttons],
         ])
@@ -881,6 +970,14 @@ class SolveEditorDialog(QDialog):
             solve.session.cached_stats_current = None
             solve.session.cached_stats_best = None
 
+    def start_playback(self, solve_id, solve_nb):
+        # HACK
+        window = self.parent()
+        while not isinstance(window, CubeWindow):
+            window = window.parent()
+        window.schedule_fn_args.emit(window.start_playback, (solve_id, solve_nb))
+        self.accept()
+
     def update_solve(self, solve_id):
         self.solve_id = solve_id
         with db.get_session() as session:
@@ -892,6 +989,21 @@ class SolveEditorDialog(QDialog):
             self.scramble_label.setText(solve.scramble)
             self.time_label.setText(str(solve.created_at))
             self.result_label.setText(solve_time_str(solve))
+            # Show a playback button if there's smart data
+            if self.smart_widget:
+                self.layout.removeWidget(self.smart_widget)
+            if solve.smart_data_raw:
+                # Get the solve number (i.e. the number within the session, not the
+                # database id). This is an extra query, so only do it here
+                solve_nb = (session.query(db.Solve).filter_by(session=solve.session)
+                        .filter(db.Solve.created_at <= solve.created_at).count())
+
+                self.smart_widget = QPushButton('View Playback')
+                self.smart_widget.pressed.connect(
+                        lambda: self.start_playback(solve_id, solve_nb))
+            else:
+                self.smart_widget = QLabel('None')
+            self.layout.addWidget(self.smart_widget, 4, 1)
         self.update()
 
     def sizeHint(self):
@@ -1138,14 +1250,27 @@ class SessionEditorDialog(QDialog):
 class SmartPlaybackWidget(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
-
         self.parent = parent
 
+        self.title = QLabel()
+        self.title.setStyleSheet('QLabel { font: 24px; }')
         self.play_button = QPushButton('Play')
-        self.time_label = QLabel()
+        self.current_time_label = QLabel()
+        self.end_time_label = QLabel()
         self.play_button.pressed.connect(self.play_pause)
 
-        make_hbox(self, [self.time_label, self.play_button])
+        slider = QSlider()
+        slider.setOrientation(Qt.Horizontal)
+        slider.valueChanged.connect(self.scrub)
+        self.slider = slider
+
+        grid = make_grid(self, [
+            [None] * 5, # Placeholder for title
+            [None, self.current_time_label, self.end_time_label, self.play_button, None],
+            [slider]
+        ], stretch=[1, 0, 0, 0, 1], widths=[0, 60, 60, 80, 0])
+        # Title takes up the middle three non-stretchy columns
+        grid.addWidget(self.title, 0, 1, 1, 3)
 
         self.timer = QTimer()
         self.timer.setSingleShot(True)
@@ -1157,14 +1282,9 @@ class SmartPlaybackWidget(QWidget):
         self.base_time = 0
         self.base_ts = 0
 
-    def play_pause(self):
-        if self.playing:
-            self.playing = False
-            self.play_button.setText('Play')
-            self.timer.stop()
-            self.base_ts = 0
-        else:
-            self.playing = True
+    def set_playing(self, playing):
+        self.playing = playing
+        if playing:
             self.play_button.setText('Pause')
             # Get current time and first timestamp so we can keep in sync
             self.base_time = time.time()
@@ -1172,6 +1292,13 @@ class SmartPlaybackWidget(QWidget):
                 self.event_idx = 0
             self.base_ts = self.events[self.event_idx][0]
             self.play_event()
+        else:
+            self.play_button.setText('Play')
+            self.timer.stop()
+            self.base_ts = 0
+
+    def play_pause(self):
+        self.set_playing(not self.playing)
 
     def play_event(self):
         # Grab all the events that should have happened by this point (at least one)
@@ -1188,49 +1315,58 @@ class SmartPlaybackWidget(QWidget):
 
         self.parent.playback_events.emit(events)
 
-        self.time_label.setText(ms_str(ts - self.base_ts))
+        self.slider.blockSignals(True)
+        self.slider.setValue(self.event_idx)
+        self.slider.blockSignals(False)
+
+        self.current_time_label.setText(ms_str(ts))
 
         if self.playing:
             # Stop playing if we're done
             if self.event_idx >= len(self.events):
-                self.playing = False
-                self.timer.stop()
+                self.set_playing(False)
             # Otherwise, schedule next event
             else:
                 ts = self.events[self.event_idx][0]
                 diff_ts = ts - self.base_ts
-                if diff_ts < 0:
-                    diff_ts += (2 ** 32) // SMART_TS_RATIO
                 diff_time = (time.time() - self.base_time) * 1000
                 next_time = diff_ts - diff_time
                 self.timer.start(max(0, int(next_time)))
 
-    def update_solve_data(self, solve_data):
+    def scrub(self, event_idx):
+        # Search for the last cube state before this event ("keyframe"), then
+        # play forward from there til the index
+        i = event_idx
+        while i > 0 and self.events[i][1] is None:
+            i -= 1
+        events = self.events[i:event_idx]
+        self.event_idx = event_idx
+
+        if events:
+            ts = events[-1][0]
+            self.base_time = time.time()
+            self.base_ts = ts
+            self.current_time_label.setText(ms_str(ts))
+
+            self.parent.playback_events.emit(events)
+        else:
+            self.set_playing(False)
+
+    def update_solve(self, solve):
         self.playing = False
-        self.events = []
         self.event_idx = 0
+        self.solve = solve
+        self.events = solve.events
+        self.title.setText('Solve %s (%s)' % (solve.solve_nb, solve.session_name))
 
-        # Parse smart solve data into event list
-        [header, *base_quat] = struct.unpack('<Bffff', solve_data[:17])
+        self.slider.setMaximum(len(self.events) - 1)
+
+        # Meh, sometimes the last event has a zero timestamp
+        end_ts = max(self.events[-1][0], self.events[-2][0])
+        self.end_time_label.setText('/ %s' % ms_str(end_ts))
+
         # Ick, reach into parent, then into gl_widget to set this...
-        self.parent.gl_widget.base_quat = base_quat
-        data = bytearray(gzip.decompress(solve_data[17:]))
-        while data:
-            [b, ts] = struct.unpack('<BH', data[:3])
-            data = data[3:]
-            if b & 0x80:
-                # Convert lazy half-float to float
-                [a, b, c, d] = struct.unpack('<hhhh', data[:8])
-                full = struct.pack('<8h', 0, a, 0, b, 0, c, 0, d)
-
-                quat = struct.unpack('<ffff', full)
-                data = data[8:]
-                self.events.append((ts, quat, None, None))
-            else:
-                face = b >> 1
-                assert 0 <= face < 6
-                turn = [-1, 1][b & 1]
-                self.events.append((ts, None, face, turn))
+        self.parent.gl_widget.base_quat = solve.base_quat
 
 class SessionSelectorDialog(QDialog):
     def __init__(self, parent):
@@ -1281,7 +1417,7 @@ class GLWidget(QOpenGLWidget):
         self.gl_init = False
         self.size = None
         self.ortho = None
-        self.bg_color = [.1, .1, .1, 1]
+        self.bg_color = [.7, .7, .7, 1]
 
     def set_render_data(self, cube, turns, quat):
         self.cube = cube

@@ -14,7 +14,7 @@ COLORS = [
     [.1, .1, .1],
 ]
 
-BG_COLOR = [.1, .1, .1, 1]
+BG_COLOR = [.7, .7, .7, 1]
 
 # How much spacing is between cubies? This is a factor--1.03 == 3% of piece size
 GAP = 1.03
