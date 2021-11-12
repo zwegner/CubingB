@@ -140,15 +140,19 @@ def solve_time_str(solve):
         return '%s +2' % ms_str(solve.time_ms)
     return ms_str(solve.time_ms)
 
-def ms_str(ms):
+def ms_str(ms, prec=3):
     if ms is None:
         return '-'
     if ms == INF:
         return 'DNF'
     if ms > 60000:
         [minutes, ms] = divmod(ms, 60000)
-        return '%d:%06.3f' % (minutes, ms / 1000)
-    return '%.3f' % (ms / 1000)
+        # Set up a format string since there's no .*f formatting
+        fmt = '%%d:%%0%s.%sf' % (prec + 3, prec)
+        return fmt % (minutes, ms / 1000)
+    # Set up a format string since there's no .*f formatting
+    fmt = '%%.%sf' % prec
+    return fmt % (ms / 1000)
 
 def cell(text, editable=False):
     item = QTableWidgetItem(text)
@@ -691,6 +695,7 @@ class TimerWidget(QLabel):
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.update_time(0, 3)
 
     def set_pending(self, pending):
         color = 'red' if pending else 'black'
@@ -698,9 +703,7 @@ class TimerWidget(QLabel):
         self.update()
 
     def update_time(self, t, prec):
-        # Set up a format string since there's no .*f formatting
-        fmt = '%%.0%sf' % prec
-        self.setText(fmt % t)
+        self.setText(ms_str(t * 1000, prec=prec))
         self.update()
 
 class InstructionWidget(QLabel):
