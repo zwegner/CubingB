@@ -576,12 +576,23 @@ class CubeWindow(QMainWindow):
                     # Done scrambling: start recording data
                     if not self.scramble_left:
                         self.state = State.SMART_SCRAMBLED
+                        # Start a timer so we wait a bit to start the
+                        # solve in case they overturn
+                        self.smart_pending_start = time.time()
                 else:
                     new_turn = solver.TURN_STR[s_turn]
                     self.scramble_left[0] = face + new_turn
             else:
                 new_turn = solver.TURN_STR[-turn % 4]
                 self.scramble_left.insert(0, face + new_turn)
+        # If we're in a scrambled state, this move needs to move us to
+        # unscrambled. If it started a solve, that would be handled earlier in
+        # make_turn(), which checks the debounce timer. So if we're here
+        # and in a scrambled state, add the inverse turn back to the scramble.
+        elif self.state == State.SMART_SCRAMBLED:
+            new_turn = solver.TURN_STR[-turn % 4]
+            self.scramble_left.insert(0, face + new_turn)
+            self.state = State.SMART_SCRAMBLING
         # Solving: check for a complete solve
         elif self.state == State.SMART_SOLVING:
             if self.check_solved():
@@ -619,11 +630,17 @@ class CubeWindow(QMainWindow):
 
         # Update state if this is the first partial turn after a scramble
         if self.state == State.SMART_SCRAMBLED:
-            self.state = State.SMART_SOLVING
-            self.prepare_smart_solve()
-            self.start_solve()
-            # Have to start timers in a qt thread
-            self.schedule_fn.emit(self.start_solve_ui)
+            # ...and enough time has elapsed since the scramble finished
+            now = time.time()
+            if now - self.smart_pending_start > TIMER_DEBOUNCE:
+                self.state = State.SMART_SOLVING
+                self.prepare_smart_solve()
+                self.start_solve()
+                # Have to start timers in a qt thread
+                self.schedule_fn.emit(self.start_solve_ui)
+            # Otherwise, restart the timer
+            else:
+                self.smart_pending_start = now
 
         # 9 incremental turns make a full quarter turn
         if abs(self.turns[face]) >= 9:
