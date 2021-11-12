@@ -70,6 +70,20 @@ def quat_matrix(values):
         0, 0, 0, 1,
     ]
 
+def vec_cross_prod(v1, v2):
+    [a, b, c] = v1
+    [x, y, z] = v2
+    return [b*z - c*y, c*x - a*z, a*y - b*x]
+
+def vec_dot_prod(v1, v2):
+    [a, b, c] = v1
+    [x, y, z] = v2
+    return a*x + b*y + c*z
+
+def vec_len_sq(v):
+    [a, b, c] = v
+    return a*a + b*b + c*c
+
 # UI helpers
 
 def calc_ao(solves, start, size):
@@ -1417,7 +1431,11 @@ class GLWidget(QOpenGLWidget):
         self.gl_init = False
         self.size = None
         self.ortho = None
+        self.drag_start_vector = None
         self.bg_color = [.7, .7, .7, 1]
+
+        self.cam_quat = [1, 0, 0, 0]
+        self.cam_base = [1, 0, 0, 0]
 
     def set_render_data(self, cube, turns, quat):
         self.cube = cube
@@ -1444,6 +1462,10 @@ class GLWidget(QOpenGLWidget):
         else:
             render.set_persective(self.size)
 
+            q = quat_mul(self.cam_quat, self.cam_base)
+            matrix = quat_matrix(quat_normalize(q))
+            render.rotate_camera(matrix)
+
             q = quat_mul(self.base_quat, self.quat)
             matrix = quat_matrix(quat_normalize(q))
 
@@ -1454,6 +1476,31 @@ class GLWidget(QOpenGLWidget):
             render.glRotatef(self.view_rot_z, 0, 0, 1)
 
         render.render_cube(self.cube, self.turns)
+
+    def mousePressEvent(self, event):
+        pos = event.windowPos()
+        [x, y, z] = render.gluUnProject(pos.x(), pos.y(), .1)
+        self.drag_start_vector = (x, -y, z)
+
+    def mouseMoveEvent(self, event):
+        pos = event.windowPos()
+        v1 = self.drag_start_vector
+        [x, y, z] = render.gluUnProject(pos.x(), pos.y(), .1)
+        v2 = (x, -y, z)
+        v1, v2 = v2, v1
+
+        if v1 == v2:
+            self.cam_quat = [1, 0, 0, 0]
+        else:
+            cross = vec_cross_prod(v1, v2)
+            w = (vec_len_sq(v1) * vec_len_sq(v2)) ** .5 + vec_dot_prod(v1, v2)
+            self.cam_quat = quat_normalize([w, *cross])
+
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        # Just multiply the current base
+        self.cam_base = quat_normalize(quat_mul(self.cam_quat, self.cam_base))
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

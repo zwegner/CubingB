@@ -126,8 +126,7 @@ def set_ortho(window_size, ax, ay):
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
     glViewport(0, 0, w, h)
-    glOrtho(-1, 1, -1, 1, -10, 10)
-    glTranslatef(0, 0, -4)
+    glOrtho(-1, 1, -1, 1, -1, 1)
 
     # Switch back to the model matrix stack for rendering
     glMatrixMode(GL_MODELVIEW)
@@ -144,6 +143,11 @@ def reset():
 def set_rotation(matrix):
     glLoadIdentity()
     glMultTransposeMatrixf(matrix)
+
+def rotate_camera(matrix):
+    glMatrixMode(GL_PROJECTION)
+    glMultTransposeMatrixf(matrix)
+    glMatrixMode(GL_MODELVIEW)
 
 def render_cube(cube, turns):
     # Render cube
