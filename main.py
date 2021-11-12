@@ -387,6 +387,7 @@ class CubeWindow(QMainWindow):
             if time.time() - self.pending_start > TIMER_DEBOUNCE:
                 self.state = State.SOLVING
                 self.start_solve()
+                self.start_solve_ui()
             else:
                 self.state = State.SCRAMBLE
                 self.stop_pending(False)
@@ -478,18 +479,20 @@ class CubeWindow(QMainWindow):
     # Initialize some data to record smart solve data. We do this before starting
     # the actual solve, since that logic only fires once the first turn is completed
     def prepare_smart_solve(self):
-        self.smart_cube_data = None
         self.smart_cube_data = bytearray()
+        self.smart_data_copy = None
 
     def start_solve(self):
-        # Start UI timer to update timer view
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
-        self.timer.start(100)
-
         self.start_time = time.time()
         self.end_time = None
         self.final_time = None
+
+    # Start UI timer to update timer view. This needs to be called from a Qt thread,
+    # so it's scheduled separately when a bluetooth event comes in
+    def start_solve_ui(self):
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(100)
 
     def finish_solve(self, dnf=False):
         self.end_time = time.time()
@@ -507,11 +510,10 @@ class CubeWindow(QMainWindow):
             sesh = session.query_first(db.Settings).current_session
             # Create data blob, with header, base rotation, and compressed solve data
             data = None
-            if self.smart_cube_data:
-                data = gzip.compress(self.smart_cube_data, compresslevel=5)
+            if self.smart_data_copy:
+                data = gzip.compress(self.smart_data_copy, compresslevel=5)
                 base_quat = struct.pack('<ffff', *self.gl_widget.base_quat)
                 data = bytes(SMART_DATA_HEADER) + base_quat + data
-                print('smart:', len(self.smart_cube_data), len(data))
 
             session.insert(db.Solve, session=sesh,
                     scramble=' '.join(self.scramble),
@@ -530,6 +532,7 @@ class CubeWindow(QMainWindow):
         self.turns = [0] * 6
         self.quat = [1, 0, 0, 0]
         self.smart_cube_data = None
+        self.smart_data_copy = None
 
     # Notify the cube widget that we've updated. We copy all the rendering
     # data to a new object so it can pick up a consistent view at its leisure
@@ -570,12 +573,19 @@ class CubeWindow(QMainWindow):
         # Scrambled: begin a solve
         elif self.state == State.SMART_SCRAMBLED:
             self.state = State.SMART_SOLVING
+            self.start_solve()
             # Have to start timers in a qt thread
-            self.schedule_fn.emit(self.start_solve)
+            self.schedule_fn.emit(self.start_solve_ui)
         # Solving: check for a complete solve
         elif self.state == State.SMART_SOLVING:
             if self.check_solved():
                 self.state = State.SMART_SCRAMBLING
+                # Move smart data buffer to a different variable so UI
+                # thread can read it, and remove the buffer so later events don't
+                # try and modify it
+                self.smart_data_copy = self.smart_cube_data
+                self.smart_cube_data = None
+
                 self.schedule_fn.emit(self.finish_solve)
 
         # XXX handle after-solve-but-pre-scramble moves
