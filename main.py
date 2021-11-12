@@ -39,7 +39,7 @@ TIMER_DEBOUNCE = .5
 INF = float('+inf')
 
 # Basic header to support future metadata/versioning/etc for smart data
-SMART_DATA_HEADER = [1]
+SMART_DATA_VERSION = 2
 
 # Quaternion helper functions
 
@@ -203,10 +203,16 @@ def make_grid(parent, table, stretch=None, widths=None):
 class SmartSolve:
     def __init__(self, solve, solve_nb):
         data = solve.smart_data_raw
+        # Parse smart solve header
+        [version, *values] = struct.unpack('<B4f4f6b', data[:39])
+        assert version == 2
+        base_quat = values[:4]
+        quat = values[4:8]
+        turns = values[8:]
+
         # Parse smart solve data into event list
-        [header, *base_quat] = struct.unpack('<Bffff', data[:17])
         events = []
-        data = bytearray(gzip.decompress(data[17:]))
+        data = bytearray(gzip.decompress(data[39:]))
         while data:
             [b, ts] = struct.unpack('<BH', data[:3])
             data = data[3:]
@@ -231,8 +237,7 @@ class SmartSolve:
         # without making a big mess of overabstraction
         cube = solver.Cube()
         cube.run_alg(solve.scramble)
-        turns = [0] * 6
-        new_events = [[0, cube, turns.copy(), None, None, None]]
+        new_events = [[0, cube, turns.copy(), quat, None, None]]
         # Variables to track what the cube/turns were before an event
         for [i, [ts, quat, face, turn]] in enumerate(events):
             # Add the updated event
@@ -481,6 +486,11 @@ class CubeWindow(QMainWindow):
     def prepare_smart_solve(self):
         self.smart_cube_data = bytearray()
         self.smart_data_copy = None
+        # Keep a copy of the initial turns so we can preserve any weird choppy
+        # turning state, keeping the recording intact
+        self.smart_start_turns = self.turns.copy()
+
+        self.smart_start_quat = self.quat
 
     def start_solve(self):
         self.start_time = time.time()
@@ -511,9 +521,12 @@ class CubeWindow(QMainWindow):
             # Create data blob, with header, base rotation, and compressed solve data
             data = None
             if self.smart_data_copy:
-                data = gzip.compress(self.smart_data_copy, compresslevel=5)
-                base_quat = struct.pack('<ffff', *self.gl_widget.base_quat)
-                data = bytes(SMART_DATA_HEADER) + base_quat + data
+                data = gzip.compress(self.smart_data_copy, compresslevel=4)
+                # Create header with initial solve state
+                header = struct.pack('<B4f4f6b', SMART_DATA_VERSION,
+                        *self.gl_widget.base_quat, *self.smart_start_quat,
+                        *self.smart_start_turns)
+                data = header + data
 
             session.insert(db.Solve, session=sesh,
                     scramble=' '.join(self.scramble),
@@ -563,19 +576,12 @@ class CubeWindow(QMainWindow):
                     # Done scrambling: start recording data
                     if not self.scramble_left:
                         self.state = State.SMART_SCRAMBLED
-                        self.schedule_fn.emit(self.prepare_smart_solve)
                 else:
                     new_turn = solver.TURN_STR[s_turn]
                     self.scramble_left[0] = face + new_turn
             else:
                 new_turn = solver.TURN_STR[-turn % 4]
                 self.scramble_left.insert(0, face + new_turn)
-        # Scrambled: begin a solve
-        elif self.state == State.SMART_SCRAMBLED:
-            self.state = State.SMART_SOLVING
-            self.start_solve()
-            # Have to start timers in a qt thread
-            self.schedule_fn.emit(self.start_solve_ui)
         # Solving: check for a complete solve
         elif self.state == State.SMART_SOLVING:
             if self.check_solved():
@@ -610,6 +616,14 @@ class CubeWindow(QMainWindow):
             turn_byte = face * 2 + {-1: 0, 1: 1}[turn]
             data = struct.pack('<BH', turn_byte, self.get_ts())
             self.smart_cube_data.extend(data)
+
+        # Update state if this is the first partial turn after a scramble
+        if self.state == State.SMART_SCRAMBLED:
+            self.state = State.SMART_SOLVING
+            self.prepare_smart_solve()
+            self.start_solve()
+            # Have to start timers in a qt thread
+            self.schedule_fn.emit(self.start_solve_ui)
 
         # 9 incremental turns make a full quarter turn
         if abs(self.turns[face]) >= 9:
