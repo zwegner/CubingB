@@ -693,9 +693,10 @@ class CubeWindow(QMainWindow):
         self.update_state_ui()
 
     def stop_playback(self):
-        self.state = State.SCRAMBLING
+        self.state = State.SMART_SCRAMBLING if USE_SMART_CUBE else State.SCRAMBLE
         self.reset()
         self.gen_scramble()
+        self.update_state_ui()
 
 class SettingsDialog(QDialog):
     def __init__(self, parent):
@@ -1313,9 +1314,11 @@ class SmartPlaybackWidget(QWidget):
         self.title = QLabel()
         self.title.setStyleSheet('QLabel { font: 24px; }')
         self.play_button = QPushButton('Play')
+        self.stop_button = QPushButton('Exit')
         self.current_time_label = QLabel()
         self.end_time_label = QLabel()
         self.play_button.pressed.connect(self.play_pause)
+        self.stop_button.pressed.connect(self.stop_playback)
 
         slider = QSlider()
         slider.setOrientation(Qt.Horizontal)
@@ -1323,12 +1326,13 @@ class SmartPlaybackWidget(QWidget):
         self.slider = slider
 
         grid = make_grid(self, [
-            [None] * 5, # Placeholder for title
-            [None, self.current_time_label, self.end_time_label, self.play_button, None],
+            [None] * 6, # Placeholder for title
+            [None, self.current_time_label, self.end_time_label, self.play_button,
+                self.stop_button, None],
             [slider]
-        ], stretch=[1, 0, 0, 0, 1], widths=[0, 60, 60, 80, 0])
-        # Title takes up the middle three non-stretchy columns
-        grid.addWidget(self.title, 0, 1, 1, 3)
+        ], stretch=[1, 0, 0, 0, 0, 1], widths=[0, 60, 60, 80, 80, 0])
+        # Title takes up the middle four non-stretchy columns
+        grid.addWidget(self.title, 0, 1, 1, 4)
 
         self.timer = QTimer()
         self.timer.setSingleShot(True)
@@ -1390,6 +1394,9 @@ class SmartPlaybackWidget(QWidget):
                 diff_time = (time.time() - self.base_time) * 1000
                 next_time = diff_ts - diff_time
                 self.timer.start(max(0, int(next_time)))
+
+    def stop_playback(self):
+        self.parent.schedule_fn.emit(self.parent.stop_playback)
 
     def scrub(self, event_idx):
         # Search for the last cube state before this event ("keyframe"), then
