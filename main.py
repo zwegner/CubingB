@@ -24,7 +24,8 @@ import struct
 import sys
 import time
 
-from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
+        QVariantAnimation)
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout,
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
@@ -41,9 +42,6 @@ import solver
 # Constants
 
 WINDOW_SIZE = [1600, 1000]
-
-# Should make UI for this
-USE_SMART_CUBE = False
 
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
         'SMART_SCRAMBLED SMART_SOLVING SMART_VIEWING')
@@ -309,10 +307,15 @@ class CubeWindow(QMainWindow):
 
     playback_events = pyqtSignal([list])
 
+    bt_scan_result = pyqtSignal([str, object])
+    bt_status_update = pyqtSignal([object])
+    bt_connected = pyqtSignal([object])
+
     def __init__(self):
         super().__init__()
         self.timer = None
         self.pending_timer = None
+        self.smart_device = None
 
         # Initialize DB and make sure there's a current session
         db.init_db(config.DB_PATH)
@@ -333,11 +336,18 @@ class CubeWindow(QMainWindow):
         self.timer_widget = TimerWidget(self)
         self.session_widget = SessionWidget(self)
         self.smart_playback_widget = SmartPlaybackWidget(self)
+        self.bt_status_widget = BluetoothStatusWidget(self)
 
+        # Set up bluetooth. This doesn't actually scan or anything yet
+        self.bt_handler = bluetooth.BluetoothHandler(self)
+
+        self.bt_connection_dialog = BluetoothConnectionDialog(self, self.bt_handler)
         self.settings_dialog = SettingsDialog(self)
 
         # Annoying: set this here so it can be overridden
-        self.setStyleSheet('TimerWidget { font: 240px Courier; }')
+        self.setStyleSheet('TimerWidget { font: 240px Courier; }'
+                'BluetoothStatusWidget { font: 24px; '
+                '   color: #FFF; background: rgb(80,80,255); padding: 5px; }')
 
         main = QWidget()
 
@@ -353,41 +363,54 @@ class CubeWindow(QMainWindow):
         make_vbox(right, [self.instruction_widget, self.smart_playback_widget,
                 self.scramble_widget, self.gl_widget, timer_container])
 
-        make_hbox(main, [self.session_widget, right])
-
         settings_button = QPushButton('Settings')
         settings_button.pressed.connect(self.settings_dialog.exec)
+        bt_button = QPushButton('Bluetooth')
+        bt_button.pressed.connect(self.bt_connection_dialog.exec)
 
-        # Create another overlapping thingy with the settings button
-        central = QWidget()
-        central_layout = QGridLayout(central)
-        central_layout.addWidget(main, 0, 0)
-        central_layout.addWidget(settings_button, 0, 0, Qt.AlignRight | Qt.AlignTop)
+        buttons = QWidget()
+        make_vbox(buttons, [settings_button, bt_button])
 
-        self.setCentralWidget(central)
+        # Make grid and overlapping status widget and buttons
+        grid = make_grid(main, [[self.session_widget, right]])
+        grid.addWidget(self.bt_status_widget, 0, 1,
+                Qt.AlignRight | Qt.AlignBottom)
+        grid.addWidget(buttons, 0, 1, Qt.AlignRight | Qt.AlignTop)
+
+        self.setCentralWidget(main)
 
         self.gen_scramble()
 
         self.update_state_ui()
 
-        # Initialize bluetooth
-        # Capture the return value just so it doesn't get GC'd and stop listening
-        if USE_SMART_CUBE:
-            self.bt = bluetooth.init_bluetooth(self)
-
         self.setWindowTitle('CubingB')
         self.setFocus()
         self.setFocusPolicy(Qt.StrongFocus)
 
+        # Wire up signals
         self.schedule_fn.connect(self.run_scheduled_fn)
         self.schedule_fn_args.connect(self.run_scheduled_fn_args)
         self.playback_events.connect(self.play_events)
+        self.bt_scan_result.connect(self.bt_connection_dialog.update_device)
+        self.bt_status_update.connect(self.bt_status_widget.update_status)
+        self.bt_connected.connect(self.got_bt_connection)
 
     def run_scheduled_fn(self, fn):
         fn()
 
     def run_scheduled_fn_args(self, fn, args):
         fn(*args)
+
+    def got_bt_connection(self, device):
+        self.smart_device = device
+        self.bt_connection_dialog.set_device(device)
+        # Move between smart scrambling and normal scrambling
+        # XXX need more logic here?
+        if device and self.state == State.SCRAMBLE:
+            self.state = State.SMART_SCRAMBLING
+        elif not device and self.state == State.SMART_SCRAMBLING:
+            self.state = State.SCRAMBLE
+        self.update_state_ui()
 
     def sizeHint(self):
         return QSize(*WINDOW_SIZE)
@@ -483,7 +506,7 @@ class CubeWindow(QMainWindow):
 
     def gen_scramble(self):
         self.reset()
-        if USE_SMART_CUBE:
+        if self.smart_device:
             self.state = State.SMART_SCRAMBLING
         else:
             self.state = State.SCRAMBLE
@@ -732,7 +755,7 @@ class CubeWindow(QMainWindow):
         self.update_state_ui()
 
     def stop_playback(self):
-        self.state = State.SMART_SCRAMBLING if USE_SMART_CUBE else State.SCRAMBLE
+        self.state = State.SMART_SCRAMBLING if self.smart_device else State.SCRAMBLE
         self.reset()
         self.gen_scramble()
         self.update_state_ui()
@@ -772,6 +795,110 @@ class SettingsDialog(QDialog):
         setattr(self.parent.gl_widget, attr, value)
         self.parent.gl_widget.update()
 
+class BluetoothConnectionDialog(QDialog):
+    def __init__(self, parent, bt_handler):
+        super().__init__(parent)
+        self.bt_handler = bt_handler
+
+        scan = QPushButton('Scan')
+        scan.pressed.connect(self.start_scan)
+
+        self.status = QLabel()
+        self.disconnect = QPushButton('Disconnect')
+        self.disconnect.hide()
+        self.disconnect.pressed.connect(self.disconnect_device)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(2)
+        self.table.setHorizontalHeaderItem(0, cell('Name'))
+        self.table.setHorizontalHeaderItem(1, cell('Status'))
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.cellDoubleClicked.connect(self.connect_device)
+
+        ok = QDialogButtonBox(QDialogButtonBox.Ok)
+        ok.accepted.connect(self.accept)
+
+        make_grid(self, [
+            [self.status, self.disconnect],
+            [scan], [self.table], [ok]])
+
+        self.timer = QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide)
+
+        self.devices = {}
+        self.current_device = None
+
+    def sizeHint(self):
+        return QSize(400, 400)
+
+    def start_scan(self):
+        self.devices = {}
+        self.bt_handler.start_bt()
+
+    def connect_device(self, row, col):
+        device = self.table.item(row, 0).secret_data
+        self.bt_handler.connect(device)
+
+    def disconnect_device(self):
+        self.bt_handler.disconnect_bt()
+
+    def set_device(self, device):
+        self.current_device = device
+        if device:
+            # XXX reaching into corebluetooth API
+            self.status.setText('Connected to %s' % device.name())
+            self.disconnect.show()
+            self.timer.start(1000)
+        else:
+            self.status.setText('')
+            self.disconnect.hide()
+        self.render()
+
+    def update_device(self, name, device):
+        self.devices[name] = device
+        self.render()
+
+    def render(self):
+        self.table.clearContents()
+        self.table.setRowCount(len(self.devices))
+        for [i, [name, device]] in enumerate(sorted(self.devices.items())):
+            self.table.setItem(i, 0, cell(name, secret_data=device))
+            status = 'Connected' if self.current_device == device else ''
+            self.table.setItem(i, 1, cell(status))
+        self.update()
+
+class BluetoothStatusWidget(QLabel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.hide()
+
+        # Set up fade out animation
+        self.anim = QVariantAnimation(self)
+        self.anim.setDuration(800)
+        self.anim.setStartValue(100)
+        self.anim.setEndValue(0)
+        self.anim.valueChanged.connect(self.set_opacity)
+        self.anim.finished.connect(self.hide)
+
+        self.fade_timer = QTimer()
+        self.fade_timer.setSingleShot(True)
+        self.fade_timer.timeout.connect(self.fade)
+
+    def set_opacity(self, value):
+        self.setStyleSheet('background: rgba(80,80,255,%s%%);' % value)
+        self.update()
+
+    def update_status(self, status):
+        self.setText(status)
+        self.show()
+        self.fade_timer.stop()
+        self.fade_timer.start(3000)
+        self.update()
+
+    def fade(self):
+        self.anim.start(QAbstractAnimation.KeepWhenStopped)
+
 class TimerWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -810,13 +937,8 @@ class ScrambleWidget(QLabel):
     def set_scramble(self, scramble, scramble_left):
         offset = max(len(scramble) - len(scramble_left), 0)
         left = ['-'] * len(scramble)
-        # Only show next 5 moves, so it looks fancy
-        if USE_SMART_CUBE:
-            for i in range(min(5, len(scramble_left), len(left))):
-                left[offset+i] = scramble_left[i]
-        else:
-            for i in range(len(scramble_left)):
-                left[offset+i] = scramble_left[i]
+        for i in range(len(scramble_left)):
+            left[offset+i] = scramble_left[i]
         self.setText(' '.join('% -2s' % s for s in left))
         self.update()
 

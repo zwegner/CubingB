@@ -29,32 +29,71 @@ FACE_MAP = [1, 3, 5, 2, 4, 0]
 TURN_MAP = {-36: -1, 36: 1}
 
 # ObjC class to connect to a bluetooth cube and parse messages
-class WeilongAIDelegate:
+class BluetoothHandler:
     def __init__(self, handler):
         self.handler = handler
 
-    def centralManagerDidUpdateState_(self, manager):
-        self.manager = manager
-        print('Scanning...')
+        objc.setVerbose(1)
+
+        # Initialize CoreBluetooth API. Apparently this needs to be done from
+        # the main thread, or at some early point? Not sure of the exact
+        # requirements, but scanning in response to a user response wouldn't
+        # work unless this setup was done first in the main thread...
+
+        # Get the global dispatch queue. By default events get dispatched to
+        # the main thread, which is weird and irritating in our case when we
+        # try to have the render thread wait for events
+        queue = libdispatch.dispatch_get_global_queue(
+                libdispatch.DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
+
+        self.manager = Foundation.CBCentralManager.alloc()
+        self.manager.initWithDelegate_queue_options_(self, queue, None)
+
+    def start_bt(self):
         # Can't scan for this service specifically? This cube is pretty wonky...
         #manager.scanForPeripheralsWithServices_options_([U('1000')], None)
-        manager.scanForPeripheralsWithServices_options_(None, None)
+        self.manager.scanForPeripheralsWithServices_options_(None, None)
+        self.handler.bt_status_update.emit('Scanning...')
+
+    def disconnect_bt(self):
+        if self.peripheral:
+            self.manager.cancelPeripheralConnection_(self.peripheral)
+            self.peripheral = None
+
+    # Gotta implement this for some reason? Maybe should pay attention
+    def centralManagerDidUpdateState_(self, manager):
+        pass
 
     def centralManager_didDiscoverPeripheral_advertisementData_RSSI_(self, manager,
             peripheral, data, rssi):
-        ident = peripheral.identifier()
-        name = peripheral.name()
-        print('Found device:', ident, name, name and 'MHC' in str(name))
+        ident = str(peripheral.identifier())
+        name = str(peripheral.name())
         if name and 'MHC' in str(name):
-            #print(dir(manager))
-            self.peripheral = peripheral
-            #peripheral.setDelegate_(self)
-            manager.connectPeripheral_options_(peripheral, None)
+            self.handler.bt_scan_result.emit(name, peripheral)
+
+    def connect(self, peripheral):
+        self.peripheral = peripheral
+        self.manager.connectPeripheral_options_(peripheral, None)
 
     def centralManager_didConnectPeripheral_(self, manager, peripheral):
-        print('Connected to', repr(peripheral.UUID()))
+        # Update status
+        msg = 'Connected to %s' % peripheral.name()
+        self.handler.bt_status_update.emit(msg)
+        self.handler.bt_connected.emit(peripheral)
+
+        self.manager.stopScan()
+
+        self.peripheral = peripheral
         peripheral.setDelegate_(self)
-        self.peripheral.discoverServices_([])
+        peripheral.discoverServices_([])
+
+    def centralManager_didDisconnectPeripheral_error_(self, manager,
+            peripheral, error):
+        # Update status
+        msg = 'Disconnected from %s' % peripheral.name()
+        self.peripheral = None
+        self.handler.bt_status_update.emit(msg)
+        self.handler.bt_connected.emit(None)
 
     def peripheral_didDiscoverServices_(self, peripheral, services):
         self.service = self.peripheral.services()[1]
@@ -106,19 +145,3 @@ class WeilongAIDelegate:
             quat = [w, x, -z, y]
 
             self.handler.update_rotation(quat, ts)
-
-def init_bluetooth(handler):
-    objc.setVerbose(1)
-
-    # Get the global dispatch queue. By default events get dispatched to
-    # the main thread, which is weird and irritating in our case when we
-    # try to have the render thread wait for events
-    queue = libdispatch.dispatch_get_global_queue(
-            libdispatch.DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
-
-    manager = Foundation.CBCentralManager.alloc()
-    manager.initWithDelegate_queue_options_(WeilongAIDelegate(handler),
-            queue, None)
-
-    # Return manager so main thread can keep a reference to it
-    return manager
