@@ -739,8 +739,10 @@ class SettingsDialog(QDialog):
 
         sliders = [[QLabel('Rotation %s:' % axis.upper()), create(axis)]
                 for axis in 'xyz']
-        
-        make_grid(self, sliders + [[buttons]])
+
+        reset_button = QPushButton('Reset Camera')
+        reset_button.pressed.connect(self.parent.gl_widget.reset_camera)
+        make_grid(self, sliders + [[reset_button], [buttons]])
 
     def update_rotation(self, axis, value):
         # Icky: reach into parent then into gl_widget, then update it
@@ -1502,7 +1504,6 @@ class GLWidget(QOpenGLWidget):
         self.ortho = None
         self.drag_start_vector = None
         self.bg_color = [.7, .7, .7, 1]
-
         self.cam_quat = [1, 0, 0, 0]
         self.cam_base = [1, 0, 0, 0]
 
@@ -1545,6 +1546,11 @@ class GLWidget(QOpenGLWidget):
             render.glRotatef(self.view_rot_z, 0, 0, 1)
 
         render.render_cube(self.cube, self.turns)
+
+    def reset_camera(self):
+        self.cam_quat = [1, 0, 0, 0]
+        self.cam_base = [1, 0, 0, 0]
+        self.update()
 
     def mousePressEvent(self, event):
         pos = event.windowPos()
