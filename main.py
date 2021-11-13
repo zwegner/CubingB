@@ -470,13 +470,19 @@ class CubeWindow(QMainWindow):
         self.end_time = None
         self.final_time = None
 
-        last_face = None
+        all_faces = set(range(6))
+        blocked_faces = set()
         turns = list(solver.TURN_STR.values())
         # Just do 25 random moves for now, not random state scrambles
         for i in range(25):
-            faces = [f for f in solver.FACE_STR if f != last_face]
-            face = random.choice(faces)
-            last_face = face
+            face = random.choice(list(all_faces - blocked_faces))
+            # Only allow one turn of each of an opposing pair of faces in a row.
+            # E.g. F B' is allowed, F B' F is not
+            if face ^ 1 not in blocked_faces:
+                blocked_faces = set()
+            blocked_faces.add(face)
+
+            face = solver.FACE_STR[face]
             move = face + random.choice(turns)
             self.scramble.append(move)
         self.scramble_left = self.scramble[:]
