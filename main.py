@@ -1595,6 +1595,8 @@ class GLWidget(QOpenGLWidget):
     def mouseReleaseEvent(self, event):
         # Just multiply the current base
         self.cam_base = quat_normalize(quat_mul(self.cam_quat, self.cam_base))
+        self.cam_quat = [1, 0, 0, 0]
+        self.update()
 
     def wheelEvent(self, event):
         delta = -event.pixelDelta().y()
