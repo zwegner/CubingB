@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
         QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
         QSlider)
+from PyQt5.QtGui import QIcon
 
 import bluetooth
 import config
@@ -1578,6 +1579,9 @@ class GLWidget(QOpenGLWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setApplicationName('CubingB')
+    icon = QIcon('pix/cubingb-icon-small.png')
+    app.setWindowIcon(icon)
     window = CubeWindow()
     window.show()
     sys.exit(app.exec_())
