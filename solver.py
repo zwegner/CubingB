@@ -1,6 +1,19 @@
-import curses
-import enum
-import random
+# CubingB, copyright 2021 Zach Wegner
+#
+# This file is part of CubingB.
+#
+# CubingB is free software: you can redistribute it and/or modify it under the
+# terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# CubingB is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
 [W, Y, R, O, G, B, X] = range(7)
 
