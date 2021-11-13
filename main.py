@@ -173,10 +173,14 @@ def ms_str(ms, prec=3):
     fmt = '%%.%sf' % prec
     return fmt % (ms / 1000)
 
-def cell(text, editable=False):
+def cell(text, editable=False, secret_data=None):
     item = QTableWidgetItem(text)
     if not editable:
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+    # Just set an attribute on the cell to pass data around?
+    # Probably not supposed to do this but it works
+    if secret_data is not None:
+        item.secret_data = secret_data
     return item
 
 def session_sort_key(s):
@@ -1010,9 +1014,8 @@ class SessionWidget(QWidget):
                 self.table.setVerticalHeaderItem(i,
                         cell('%s' % (len(solves) - i)))
                 # HACK: set the secret data so the solve editor gets the ID
-                solve_str = cell(ms_str(solve_time(solve)))
-                solve_str.secret_data = solve.id
-                self.table.setItem(i, 0, solve_str)
+                self.table.setItem(i, 0, cell(ms_str(solve_time(solve)),
+                        secret_data=solve.id))
                 stats = solve.cached_stats or {}
                 self.table.setItem(i, 1,
                         cell(ms_str(stats.get('ao5'))))
@@ -1319,14 +1322,10 @@ class SessionEditorDialog(QDialog):
                 stats = sesh.cached_stats_best or {}
                 sesh_id = session_sort_key(sesh)
                 self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
-                name_widget = cell(sesh.name, editable=True)
-                scramble_widget = cell(sesh.scramble_type, editable=True)
-                # Just set an attribute on the cell to pass data around?
-                # Probably not supposed to do this but it works
-                name_widget.secret_data = (sesh.id, 'name')
-                scramble_widget.secret_data = (sesh.id, 'scramble_type')
-                self.table.setItem(i, 0, name_widget)
-                self.table.setItem(i, 1, scramble_widget)
+                self.table.setItem(i, 0, cell(sesh.name, editable=True,
+                        secret_data=(sesh.id, 'name')))
+                self.table.setItem(i, 1, cell(sesh.scramble_type, editable=True,
+                        secret_data=(sesh.id, 'scramble_type')))
                 self.table.setItem(i, 2, cell(str(n_solves)))
                 for [j, stat] in enumerate(STAT_AO_COUNTS):
                     stat = stat_str(stat)
