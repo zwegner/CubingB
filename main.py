@@ -1350,6 +1350,7 @@ class SmartPlaybackWidget(QWidget):
 
         self.title = QLabel()
         self.title.setStyleSheet('QLabel { font: 24px; }')
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.play_button = QPushButton('Play')
         self.stop_button = QPushButton('Exit')
         self.current_time_label = QLabel()
@@ -1365,11 +1366,11 @@ class SmartPlaybackWidget(QWidget):
         grid = make_grid(self, [
             [None] * 6, # Placeholder for title
             [None, self.current_time_label, self.end_time_label, self.play_button,
-                self.stop_button, None],
+                None, self.stop_button],
             [slider]
-        ], stretch=[1, 0, 0, 0, 0, 1], widths=[0, 60, 60, 80, 80, 0])
-        # Title takes up the middle four non-stretchy columns
-        grid.addWidget(self.title, 0, 1, 1, 4)
+        ], stretch=[1, 0, 0, 0, 1, 0], widths=[0, 60, 60, 80, 0, 80])
+        # Title takes up the middle three non-stretchy columns
+        grid.addWidget(self.title, 0, 1, 1, 3)
 
         self.timer = QTimer()
         self.timer.setSingleShot(True)
