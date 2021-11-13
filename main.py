@@ -344,11 +344,6 @@ class CubeWindow(QMainWindow):
         self.bt_connection_dialog = BluetoothConnectionDialog(self, self.bt_handler)
         self.settings_dialog = SettingsDialog(self)
 
-        # Annoying: set this here so it can be overridden
-        self.setStyleSheet('TimerWidget { font: 240px Courier; }'
-                'BluetoothStatusWidget { font: 24px; '
-                '   color: #FFF; background: rgb(80,80,255); padding: 5px; }')
-
         main = QWidget()
 
         # Create an overlapping widget thingy so the scramble is above the timer
@@ -358,10 +353,14 @@ class CubeWindow(QMainWindow):
         timer_layout.addWidget(self.scramble_view_widget, 0, 0,
                 Qt.AlignRight | Qt.AlignTop)
 
+        top = QWidget()
+        top.setObjectName('top')
+        make_hbox(top, [self.instruction_widget, self.smart_playback_widget,
+                self.scramble_widget])
+
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        make_vbox(right, [self.instruction_widget, self.smart_playback_widget,
-                self.scramble_widget, self.gl_widget, timer_container])
+        make_vbox(right, [top, self.gl_widget, timer_container])
 
         settings_button = QPushButton('Settings')
         settings_button.pressed.connect(self.settings_dialog.exec)
@@ -378,6 +377,13 @@ class CubeWindow(QMainWindow):
         grid.addWidget(buttons, 0, 1, Qt.AlignRight | Qt.AlignTop)
 
         self.setCentralWidget(main)
+
+        # Annoying: set up style here in the parent, so it can be overridden
+        # in children
+        self.setStyleSheet('TimerWidget { font: 240px Courier; }'
+                'BluetoothStatusWidget { font: 24px; '
+                '   color: #FFF; background: rgb(80,80,255); padding: 5px; }'
+                '#top * { padding-right: 100px; }')
 
         self.gen_scramble()
 
@@ -899,6 +905,10 @@ class BluetoothStatusWidget(QLabel):
     def fade(self):
         self.anim.start(QAbstractAnimation.KeepWhenStopped)
 
+    def hide(self):
+        super().hide()
+        self.setStyleSheet('background: rgba(80,80,255,100%);')
+
 class TimerWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -909,7 +919,7 @@ class TimerWidget(QLabel):
 
     def set_pending(self, pending):
         color = 'red' if pending else 'black'
-        self.setStyleSheet('TimerWidget { color: %s }' % color)
+        self.setStyleSheet('color: %s;' % color)
         self.update()
 
     def update_time(self, t, prec):
