@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
         QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
-        QSlider)
+        QSlider, QMessageBox)
 from PyQt5.QtGui import QIcon
 
 import bluetooth
@@ -1174,6 +1174,9 @@ class SolveEditorDialog(QDialog):
         self.plus_2 = QCheckBox('+2')
         self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', v))
 
+        delete = QPushButton('Delete')
+        delete.pressed.connect(self.delete_solve)
+
         self.layout = make_grid(self, [
             [QLabel('Session:'), self.session_label],
             [QLabel('Time:'), self.time_label],
@@ -1181,6 +1184,7 @@ class SolveEditorDialog(QDialog):
             [QLabel('Scramble:'), self.scramble_label],
             [QLabel('Smart data:'), self.smart_widget],
             [self.dnf, self.plus_2],
+            [delete],
             [buttons],
         ])
 
@@ -1236,6 +1240,19 @@ class SolveEditorDialog(QDialog):
                 self.smart_widget = QLabel('None')
             self.layout.addWidget(self.smart_widget, 4, 1)
         self.update()
+
+    def delete_solve(self):
+        response = QMessageBox.question(self, 'Confirm delete',
+                'Are you sure you want to delete this solve? This cannot '
+                ' be undone!', QMessageBox.Ok | QMessageBox.Cancel)
+        if response == QMessageBox.Ok:
+            with db.get_session() as session:
+                solve = session.query_first(db.Solve, id=self.solve_id)
+                solve.session.cached_stats_current = None
+                solve.session.cached_stats_best = None
+
+                session.query(db.Solve).filter_by(id=self.solve_id).delete()
+            self.accept()
 
     def sizeHint(self):
         return QSize(400, 100)
