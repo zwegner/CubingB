@@ -1207,6 +1207,8 @@ class SolveEditorDialog(QDialog):
 
         delete = QPushButton('Delete')
         delete.pressed.connect(self.delete_solve)
+        merge = QPushButton('Move to session...')
+        merge.pressed.connect(self.move_solve)
 
         self.layout = make_grid(self, [
             [QLabel('Session:'), self.session_label],
@@ -1215,9 +1217,11 @@ class SolveEditorDialog(QDialog):
             [QLabel('Scramble:'), self.scramble_label],
             [QLabel('Smart data:'), self.smart_widget],
             [self.dnf, self.plus_2],
-            [delete],
+            [delete, merge],
             [buttons],
         ])
+
+        self.session_selector = SessionSelectorDialog(self)
 
         self.solve_id = None
 
@@ -1280,6 +1284,17 @@ class SolveEditorDialog(QDialog):
 
                 session.query(db.Solve).filter_by(id=self.solve_id).delete()
             self.accept()
+
+    def move_solve(self):
+        with db.get_session() as session:
+            solve = session.query_first(db.Solve, id=self.solve_id)
+            msg = 'Move solve %s to session:' % get_solve_nb(session, solve)
+            query = session.query(db.Solve).filter_by(id=self.solve_id)
+
+            merge_id = show_merge_dialog(session, self.session_selector,
+                    msg, query, exclude_session=solve.session_id)
+            if merge_id is not None:
+                self.accept()
 
     def sizeHint(self):
         return QSize(400, 100)
