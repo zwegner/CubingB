@@ -218,6 +218,37 @@ def make_grid(parent, table, stretch=None, widths=None):
             layout.setColumnMinimumWidth(i, w)
     return layout
 
+# Get the solve number (i.e. the number within the session, not the
+# database id)
+def get_solve_nb(session, solve):
+    return (session.query(db.Solve).filter_by(session=solve.session)
+            .filter(db.Solve.created_at <= solve.created_at).count())
+
+# A slightly weird abstraction: show a session selector dialog (already created
+# by the caller), and if the user confirms, merge all the solves in the given
+# query into the selected session, all in a given db session. Returns whether
+# the solves were merged.
+def show_merge_dialog(session, session_selector, msg, query, exclude_session=None):
+    # Get relevant sessions to merge into
+    sessions = session.query(db.Session)
+    if exclude_session is not None:
+        sessions = sessions.filter(db.Session.id != exclude_session)
+    sessions = sorted(sessions.all(), key=session_sort_key)
+
+    # Show dialog and merge sessions if accepted
+    session_selector.update_data(msg, sessions)
+    if session_selector.exec():
+        # Update solve IDs and delete old session
+        merge_id = session_selector.selected_session_id
+        query.update({db.Solve.session_id: merge_id})
+
+        # Clear stat cache
+        new_sesh = session.query_first(db.Session, id=merge_id)
+        new_sesh.cached_stats_current = None
+        new_sesh.cached_stats_best = None
+        return merge_id
+    return None
+
 # Smart cube analysis stuff
 
 # This class is basically a bigass constructor
@@ -1228,11 +1259,7 @@ class SolveEditorDialog(QDialog):
             if self.smart_widget:
                 self.layout.removeWidget(self.smart_widget)
             if solve.smart_data_raw:
-                # Get the solve number (i.e. the number within the session, not the
-                # database id). This is an extra query, so only do it here
-                solve_nb = (session.query(db.Solve).filter_by(session=solve.session)
-                        .filter(db.Solve.created_at <= solve.created_at).count())
-
+                solve_nb = get_solve_nb(session, solve)
                 self.smart_widget = QPushButton('View Playback')
                 self.smart_widget.pressed.connect(
                         lambda: self.start_playback(solve_id, solve_nb))
@@ -1422,26 +1449,15 @@ class SessionEditorDialog(QDialog):
 
     def merge_sessions(self, session_id):
         with db.get_session() as session:
-            # Update session selector dialog
             sesh = session.query_first(db.Session, id=session_id)
-            sessions = (session.query(db.Session).filter(
-                    db.Session.id != session_id).all())
-            sessions = sorted(sessions, key=session_sort_key)
-            self.session_selector.update_data('Merge %s into session:' % sesh.name, 
-                    sessions)
-            # Show dialog and merge sessions if accepted
-            if self.session_selector.exec():
-                # Update solve IDs and delete old session
-                merge_id = self.session_selector.selected_session_id
-                assert session_id != merge_id
-                session.query(db.Solve).filter_by(session_id=session_id).update(
-                        {db.Solve.session_id: merge_id})
+            msg = 'Merge %s into session:' % sesh.name
+            query = session.query(db.Solve).filter_by(session_id=session_id)
+            merge_id = show_merge_dialog(session, self.session_selector,
+                    msg, query, exclude_session=session_id)
+            if merge_id is not None:
+                assert merge_id != session_id
+                # Delete old session
                 session.query(db.Session).filter_by(id=session_id).delete()
-
-                # Clear stat cache
-                new_sesh = session.query_first(db.Session, id=merge_id)
-                new_sesh.cached_stats_current = None
-                new_sesh.cached_stats_best = None
 
                 # Update current session if necessary
                 settings = session.query_first(db.Settings)
