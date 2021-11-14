@@ -947,7 +947,7 @@ class ScrambleWidget(QLabel):
     def set_scramble(self, scramble, scramble_left):
         offset = max(len(scramble) - len(scramble_left), 0)
         left = ['-'] * len(scramble)
-        for i in range(len(scramble_left)):
+        for i in range(min(len(left), len(scramble_left))):
             left[offset+i] = scramble_left[i]
         self.setText(' '.join('% -2s' % s for s in left))
         self.update()
