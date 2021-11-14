@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
         QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
-        QSlider, QMessageBox)
+        QSlider, QMessageBox, QInputDialog)
 from PyQt5.QtGui import QIcon
 
 import bluetooth
@@ -228,7 +228,8 @@ def get_solve_nb(session, solve):
 # by the caller), and if the user confirms, merge all the solves in the given
 # query into the selected session, all in a given db session. Returns whether
 # the solves were merged.
-def show_merge_dialog(session, session_selector, msg, query, exclude_session=None):
+def show_merge_dialog(session, session_selector, msg, query, exclude_session=None,
+        allow_new=False):
     # Get relevant sessions to merge into
     sessions = session.query(db.Session)
     if exclude_session is not None:
@@ -236,10 +237,14 @@ def show_merge_dialog(session, session_selector, msg, query, exclude_session=Non
     sessions = sorted(sessions.all(), key=session_sort_key)
 
     # Show dialog and merge sessions if accepted
-    session_selector.update_data(msg, sessions)
+    session_selector.update_data(msg, sessions, allow_new=allow_new)
     if session_selector.exec():
-        # Update solve IDs and delete old session
+        # Create a new session if requested
         merge_id = session_selector.selected_session_id
+        if isinstance(merge_id, str):
+            merge_id = session.insert(db.Session, name=merge_id).id
+
+        # Merge solves
         query.update({db.Solve.session_id: merge_id})
 
         # Clear stat cache
@@ -1083,8 +1088,6 @@ class SessionWidget(QWidget):
                 self.session_editor.update_items()
                 if not self.session_editor.exec():
                     session.rollback()
-            elif id == 'delete':
-                assert 0
             else:
                 settings.current_session = session.query_first(db.Session, id=id)
             session.flush()
@@ -1099,16 +1102,16 @@ class SessionWidget(QWidget):
 
             # Set up dropdown
             self.selector.clear()
-            self.session_ids = {}
+            self.session_ids = []
             sessions = session.query_all(db.Session)
             sessions = sorted(sessions, key=session_sort_key)
-            for [i, s] in enumerate(sessions):
-                self.session_ids[i] = s.id
+            for s in sessions:
+                self.session_ids.append(s.id)
                 self.selector.addItem(s.name)
                 if s.id == sesh.id:
-                    self.selector.setCurrentIndex(i)
-            for cmd in ['new', 'edit', 'delete']:
-                self.session_ids[self.selector.count()] = cmd
+                    self.selector.setCurrentIndex(len(self.session_ids) - 1)
+            for cmd in ['new', 'edit']:
+                self.session_ids.append(cmd)
                 self.selector.addItem(cmd.title() + '...')
 
             self.selector.blockSignals(False)
@@ -1291,8 +1294,8 @@ class SolveEditorDialog(QDialog):
             msg = 'Move solve %s to session:' % get_solve_nb(session, solve)
             query = session.query(db.Solve).filter_by(id=self.solve_id)
 
-            merge_id = show_merge_dialog(session, self.session_selector,
-                    msg, query, exclude_session=solve.session_id)
+            merge_id = show_merge_dialog(session, self.session_selector, msg,
+                    query, exclude_session=solve.session_id, allow_new=True)
             if merge_id is not None:
                 self.accept()
 
@@ -1666,21 +1669,30 @@ class SessionSelectorDialog(QDialog):
         make_vbox(self, [top, buttons])
 
         self.selected_session = None
-        self.session_ids = {}
+        self.session_ids = []
 
-    def update_data(self, message, sessions):
+    def update_data(self, message, sessions, allow_new=False):
         self.selected_session = None
 
         self.label.setText(message)
         self.selector.clear()
-        self.session_ids = {}
-        for [i, s] in enumerate(sessions):
-            self.session_ids[i] = s.id
+        self.session_ids = []
+        for s in sessions:
+            self.session_ids.append(s.id)
             self.selector.addItem(s.name)
+        if allow_new:
+            self.session_ids.append(None)
+            self.selector.addItem('New...')
 
     def accept_session(self):
         i = self.selector.currentIndex()
         self.selected_session_id = self.session_ids[i]
+        if self.selected_session_id is None:
+            [name, accepted] = QInputDialog.getText(self, 'New session name',
+                    'Enter new session name:', text='New Session')
+            if not accepted:
+                self.reject()
+            self.selected_session_id = name
         self.accept()
 
 # Display the cube
