@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
         QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
-        QSlider, QMessageBox, QInputDialog)
+        QSlider, QMessageBox, QInputDialog, QMenu, QAction)
 from PyQt5.QtGui import QIcon
 
 import bluetooth
@@ -1043,6 +1043,11 @@ class SessionWidget(QWidget):
 
         self.stats = QWidget()
 
+        action = QAction('Move to session...', self)
+        action.triggered.connect(self.move_selection)
+        self.ctx_menu = QMenu(self)
+        self.ctx_menu.addAction(action)
+
         self.table = QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderItem(0, cell('Time'))
@@ -1050,12 +1055,15 @@ class SessionWidget(QWidget):
         self.table.setHorizontalHeaderItem(2, cell('ao12'))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.cellDoubleClicked.connect(self.edit_solve)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
         title = QWidget()
         make_hbox(title, [self.label, self.selector])
         self.layout = make_vbox(self, [title, self.stats, self.table])
 
         self.session_editor = SessionEditorDialog(self)
+        self.session_selector = SessionSelectorDialog(self)
         self.solve_editor = SolveEditorDialog(self)
         self.average_viewer = AverageDialog(self)
 
@@ -1074,6 +1082,21 @@ class SessionWidget(QWidget):
             n_solves = 5 if col == 1 else 12
             self.average_viewer.update_solve(solve_id, n_solves)
             self.average_viewer.exec()
+
+    def show_ctx_menu(self, pos):
+        self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
+
+    def move_selection(self):
+        with db.get_session() as session:
+            rows = {item.row() for item in self.table.selectedItems()}
+            solves = [self.table.item(row, 0).secret_data for row in rows]
+            msg = 'Move %s solve(s) to session:' % len(solves)
+            query = session.query(db.Solve).filter(db.Solve.id.in_(solves))
+
+            merge_id = show_merge_dialog(session, self.session_selector, msg,
+                    query, allow_new=True)
+            if merge_id is not None:
+                self.trigger_update()
 
     def change_session(self, index):
         with db.get_session() as session:
