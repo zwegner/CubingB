@@ -419,7 +419,7 @@ class CubeWindow(QMainWindow):
         self.setStyleSheet('TimerWidget { font: 240px Courier; }'
                 'BluetoothStatusWidget { font: 24px; '
                 '   color: #FFF; background: rgb(80,80,255); padding: 5px; }'
-                '#top * { padding-right: 100px; }')
+                '#top > * { padding-right: 100px; }')
 
         self.gen_scramble()
 
