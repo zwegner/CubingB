@@ -296,6 +296,14 @@ class SmartSolve:
         # without making a big mess of overabstraction
         cube = solver.Cube()
         cube.run_alg(solve.scramble)
+        orient = list(range(6))
+        moves = []
+        last_face = None
+        last_turn = 0
+        last_ts = 0
+        last_slice_face = None
+        last_slice_turn = None
+        last_slice_ts = None
         new_events = [[0, cube, turns.copy(), quat, None, None]]
         # Variables to track what the cube/turns were before an event
         for [i, [ts, quat, face, turn]] in enumerate(events):
@@ -320,6 +328,56 @@ class SmartSolve:
 
                     alg = solver.FACE_STR[face] + solver.TURN_STR[turn]
 
+                    # Merge moves of the same made within a short time window
+                    # for purposes of reconstruction
+                    if face == last_face and ts - last_ts < 500 and last_turn + turn:
+                        last_turn += turn
+                        last_turn %= 4
+                        moves[-1] = (solver.FACE_STR[orient[face]] +
+                                solver.TURN_STR[last_turn])
+                    # Likewise with opposite moves into slice moves, but with a
+                    # smaller window
+                    elif (face ^ 1 == last_face and turn == -last_turn and
+                            abs(turn) == 1 and ts - last_ts < 100):
+                        slice_str = solver.SLICE_STR[orient[face] >> 1]
+                        # Merge with previous slice for M2, S2, E2
+                        merge = False
+                        if (last_slice_face is not None and
+                                last_slice_face >> 1 == face >> 1 and
+                                ts - last_slice_ts < 500):
+                            if face != last_slice_face:
+                                last_slice_turn += 2
+                            last_slice_turn += turn
+                            last_slice_turn %= 4
+                            merge = last_slice_turn != 0
+                        if merge:
+                            moves[-2:] = [slice_str + solver.TURN_STR[last_slice_turn]]
+                            last_slice_face = None
+                        else:
+                            last_face = None
+                            last_slice_face = face
+                            last_slice_turn = turn
+                            last_slice_ts = ts
+                            slice_turn = (turn + solver.SLICE_FLIP[face]) % 4
+                            moves[-1] = slice_str + solver.TURN_STR[slice_turn]
+                        # Fix up center orientation from the slice
+                        rotation = solver.ROTATE_FACES[face >> 1]
+                        if not face & 1:
+                            turn += 2
+                        for i in range(turn % 4):
+                            orient = [orient[x] for x in rotation]
+                    else:
+                        last_face = face
+                        last_turn = turn
+                        # Look up current name of given face based on rotations
+                        moves.append(solver.FACE_STR[orient[face]] +
+                                solver.TURN_STR[turn])
+
+                    last_ts = ts
+                    if (last_slice_face is not None and
+                            face >> 1 != last_slice_face >> 1):
+                        last_slice_face = None
+
                     turns = turns.copy()
                     cube = cube.copy()
                     cube.run_alg(alg)
@@ -331,7 +389,11 @@ class SmartSolve:
         self.base_quat = base_quat
         self.events = new_events
         self.solve_nb = solve_nb
+        self.reconstruction = ' '.join(moves)
         self.session_name = solve.session.name
+
+        scrambled = solver.Cube().run_alg(self.scramble)
+        assert scrambled.run_alg(self.reconstruction) == SOLVED_CUBE
 
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.

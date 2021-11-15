@@ -38,6 +38,12 @@ RX = [5, 4, 2, 3, 0, 1]
 RZ = [2, 3, 1, 0, 4, 5]
 ROTATE_FACES = [RY, RX, RZ]
 
+# M and E moves are dumb and have backwards notation
+SLICE_FLIP = [0, 2, 0, 2, 2, 0]
+SLICE_ROT_FLIP = [1, 1, 0]
+
+COLOR_STR = ['white', 'yellow', 'red', 'orange', 'green', 'blue']
+SLICE_STR = 'EMS'
 FACE_STR = 'UDRLFB'
 ROTATE_STR = 'yxz'
 TURN_STR = {-1: "'", 1: '', 2: '2', 3: "'"}
@@ -67,6 +73,7 @@ class Cube:
                 self.turn(r, n)
             if r2 is not None:
                 self.turn(r2, n2)
+        return self
 
     def __eq__(self, other):
         return (self.centers == other.centers and self.edges == other.edges and
@@ -208,8 +215,20 @@ def parse_alg(alg):
                 face ^= 1
 
         elif move[0] in ROTATE_STR:
-            rot = ROTATE_STR.index(move[0].lower())
+            rot = ROTATE_STR.index(move[0])
             rn = parse_rot(move)
+
+        elif move[0] in SLICE_STR:
+            rot = SLICE_STR.index(move[0])
+            rn = parse_rot(move)
+            if SLICE_ROT_FLIP[rot]:
+                rn = 2 - rn
+            face = rot * 2
+            n = 2 - rn
+            f2 = face + 1
+            n2 = rn
+        else:
+            assert 0, move
 
         moves.append((rot, rn, face, n, f2, n2))
     return moves
