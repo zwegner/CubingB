@@ -797,9 +797,6 @@ class CubeWindow(QMainWindow):
 
     # XXX for now we use weilong units, 1/36th turns
     def update_turn(self, face, turn, ts):
-        # Add up partial turns
-        self.turns[face] += turn
-
         # Record data if we're in a solve
         if self.smart_cube_data is not None:
             turn_byte = face * 2 + {-1: 0, 1: 1}[turn]
@@ -819,6 +816,9 @@ class CubeWindow(QMainWindow):
             # Otherwise, restart the timer
             else:
                 self.smart_pending_start = now
+
+        # Add up partial turns
+        self.turns[face] += turn
 
         # 9 incremental turns make a full quarter turn
         if abs(self.turns[face]) >= 9:
@@ -1721,7 +1721,7 @@ class SmartPlaybackWidget(QWidget):
         i = event_idx
         while i > 0 and self.events[i].cube is None:
             i -= 1
-        events = self.events[i:event_idx]
+        events = self.events[i:event_idx+1]
         self.event_idx = event_idx
 
         if events:
@@ -1746,6 +1746,9 @@ class SmartPlaybackWidget(QWidget):
         # Meh, sometimes the last event has a zero timestamp
         end_ts = max(self.events[-1].ts, self.events[-2].ts)
         self.end_time_label.setText('/ %s' % ms_str(end_ts))
+
+        # Play the first event to set the scramble
+        self.parent.playback_events.emit(solve.events[:1])
 
         # Ick, reach into parent, then into gl_widget to set this...
         self.parent.gl_widget.base_quat = solve.base_quat
