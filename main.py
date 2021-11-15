@@ -256,6 +256,18 @@ def show_merge_dialog(session, session_selector, msg, query, exclude_session=Non
 
 # Smart cube analysis stuff
 
+class SmartEvent:
+    def __init__(self, ts=None, cube=None, turns=None, quat=None, face=None,
+            turn=None, rotation=None, rot_n=None):
+        self.ts = ts
+        self.cube = cube
+        self.turns = turns
+        self.quat = quat
+        self.face = face
+        self.turn = turn
+        self.rotation = rotation
+        self.rot_n = rot_n
+
 # This class is basically a bigass constructor
 class SmartSolve:
     def __init__(self, solve, solve_nb):
@@ -304,11 +316,11 @@ class SmartSolve:
         last_slice_face = None
         last_slice_turn = None
         last_slice_ts = None
-        new_events = [[0, cube, turns.copy(), quat, None, None]]
+        new_events = [SmartEvent(ts=0, cube=cube, turns=turns.copy(), quat=quat)]
         # Variables to track what the cube/turns were before an event
         for [i, [ts, quat, face, turn]] in enumerate(events):
             # Add the updated event
-            new_events.append([ts, None, None, quat, face, turn])
+            new_events.append(SmartEvent(ts=ts, quat=quat, face=face, turn=turn))
 
             if face is not None:
                 turns[face] += turn
@@ -383,7 +395,7 @@ class SmartSolve:
                     cube.run_alg(alg)
 
                     # Copy the new cube/turns to an event if they just changed
-                    new_events.append([ts, cube, turns.copy(), None, None, None])
+                    new_events.append(SmartEvent(ts=ts, cube=cube, turns=turns.copy()))
 
         self.scramble = solve.scramble
         self.base_quat = base_quat
@@ -839,15 +851,15 @@ class CubeWindow(QMainWindow):
 
     def play_events(self, events):
         quat = None
-        for [ts, cube, turns, quat, face, turn] in events:
-            if cube:
-                self.cube = cube.copy()
-                self.turns = turns.copy()
-            if face is not None:
-                self.turns[face] += turn
+        for e in events:
+            if e.cube:
+                self.cube = e.cube.copy()
+                self.turns = e.turns.copy()
+            if e.face is not None:
+                self.turns[e.face] += e.turn
         # Only show the last rotation, since they're not incremental
-        if quat:
-            self.quat = quat
+        if e.quat:
+            self.quat = e.quat
         self.mark_changed()
 
     def start_playback(self, solve_id, solve_nb):
@@ -1657,7 +1669,7 @@ class SmartPlaybackWidget(QWidget):
             self.base_time = time.time()
             if self.event_idx >= len(self.events):
                 self.event_idx = 0
-            self.base_ts = self.events[self.event_idx][0]
+            self.base_ts = self.events[self.event_idx].ts
             self.play_event()
         else:
             self.play_button.setText('Play')
@@ -1670,12 +1682,12 @@ class SmartPlaybackWidget(QWidget):
     def play_event(self):
         # Grab all the events that should have happened by this point (at least one)
         max_ts = self.base_ts + (time.time() - self.base_time) * 1000
-        ts = self.events[self.event_idx][0]
+        ts = self.events[self.event_idx].ts
         events = [self.events[self.event_idx]]
         self.event_idx += 1
         while self.event_idx < len(self.events):
             event = self.events[self.event_idx]
-            if event[0] > max_ts:
+            if event.ts > max_ts:
                 break
             events.append(event)
             self.event_idx += 1
@@ -1694,7 +1706,7 @@ class SmartPlaybackWidget(QWidget):
                 self.set_playing(False)
             # Otherwise, schedule next event
             else:
-                ts = self.events[self.event_idx][0]
+                ts = self.events[self.event_idx].ts
                 diff_ts = ts - self.base_ts
                 diff_time = (time.time() - self.base_time) * 1000
                 next_time = diff_ts - diff_time
@@ -1707,13 +1719,13 @@ class SmartPlaybackWidget(QWidget):
         # Search for the last cube state before this event ("keyframe"), then
         # play forward from there til the index
         i = event_idx
-        while i > 0 and self.events[i][1] is None:
+        while i > 0 and self.events[i].cube is None:
             i -= 1
         events = self.events[i:event_idx]
         self.event_idx = event_idx
 
         if events:
-            ts = events[-1][0]
+            ts = events[-1].ts
             self.base_time = time.time()
             self.base_ts = ts
             self.current_time_label.setText(ms_str(ts))
@@ -1732,7 +1744,7 @@ class SmartPlaybackWidget(QWidget):
         self.slider.setMaximum(len(self.events) - 1)
 
         # Meh, sometimes the last event has a zero timestamp
-        end_ts = max(self.events[-1][0], self.events[-2][0])
+        end_ts = max(self.events[-1].ts, self.events[-2].ts)
         self.end_time_label.setText('/ %s' % ms_str(end_ts))
 
         # Ick, reach into parent, then into gl_widget to set this...
