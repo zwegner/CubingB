@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
+import collections
 import enum
 import gzip
 import random
@@ -1442,9 +1443,21 @@ class AverageDialog(QDialog):
     def sizeHint(self):
         return QSize(400, 100)
 
+GRAPH_TYPES = ['adaptive', 'date', 'count']
+
 class GraphDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
+
+        self.title = QLabel()
+        self.title.setStyleSheet('font: 24px')
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        select_label = QLabel('Graph Type:')
+        self.selector = QComboBox()
+        for t in GRAPH_TYPES:
+            self.selector.addItem(t)
+        self.selector.currentIndexChanged.connect(self.change_type)
 
         self.figure = Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
@@ -1452,21 +1465,82 @@ class GraphDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok)
         buttons.accepted.connect(self.accept)
 
+        self.type = 'adaptive'
+        self.stat = 'ao100'
+        self.solves = None
+
         make_grid(self, [
+            [None, None, self.title, select_label, self.selector],
             [self.canvas],
             [buttons],
-        ])
+        ], stretch=[0, 0, 1, 0, 0])
+
+    def change_type(self):
+        self.type = GRAPH_TYPES[self.selector.currentIndex()]
+        self.render()
 
     def update_data(self, solve_sets, stat='single'):
+        self.stat = stat
+        self.solve_sets = {name: [(s.created_at, s.cached_stats) for s in ss]
+                for [name, ss] in solve_sets.items()}
+
+        self.render()
+
+    def render(self):
+        if len(self.solve_sets) == 1:
+            for name in self.solve_sets.keys():
+                self.title.setText('%s: %s' % (name, self.stat))
+        else:
+            self.title.setText('%s sessions: %s' % (len(self.solve_sets), self.stat))
+
         self.figure.clear()
         plot = self.figure.add_subplot()
-        maxlen = max(len(s) for s in solve_sets.values())
-        for [name, solves] in solve_sets.items():
-            #x = [s.created_at for s in solves]
-            x = range(maxlen - len(solves), maxlen)
-            y = [s.cached_stats[stat] / 1000 if s.cached_stats[stat] else None
-                    for s in solves]
+
+        # Preprocessing for different graph types
+        if self.type == 'count':
+            maxlen = max(len(s) for s in self.solve_sets.values())
+        elif self.type == 'adaptive':
+            solves_per_day = collections.Counter(d.date()
+                for [name, solves] in self.solve_sets.items() for [d, s] in solves)
+            day_ordinal = {d: i for [i, d] in enumerate(sorted(solves_per_day))}
+            first_day = min(solves_per_day)
+
+        # Create plot for each session's solves
+        for [name, solves] in self.solve_sets.items():
+            # Create x series based on graph type
+
+            # Date: just use the solve time
+            if self.type == 'date':
+                x = [d for [d, s] in solves]
+
+            # Count: solve number, but right aligned among all sessions
+            elif self.type == 'count':
+                x = range(maxlen - len(solves), maxlen)
+
+            # Adaptive: for every day that had solves, stretch all solves out
+            # evenly throughout the day
+            elif self.type == 'adaptive':
+                sesh_solves_per_day = collections.Counter(d.date()
+                        for [d, s] in solves)
+
+                x = []
+                last_day = None
+                dc = 0
+                for [d, s] in solves:
+                    d = d.date()
+                    if last_day and d > last_day:
+                        dc = 0
+                    last_day = d
+                    x.append(day_ordinal[d] +
+                            dc / sesh_solves_per_day[d])
+                    dc += 1
+
+            # Create y series from the given stat
+            y = [s[self.stat] / 1000 if s[self.stat] else None
+                    for [d, s] in solves]
+
             plot.plot(x, y, '.', label=name, markersize=1)
+
         plot.legend(loc='upper right')
         self.canvas.draw()
 
