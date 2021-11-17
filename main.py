@@ -801,12 +801,6 @@ class CubeWindow(QMainWindow):
 
     # XXX for now we use weilong units, 1/36th turns
     def update_turn(self, face, turn, ts):
-        # Record data if we're in a solve
-        if self.smart_cube_data is not None:
-            turn_byte = face * 2 + {-1: 0, 1: 1}[turn]
-            data = struct.pack('<BH', turn_byte, self.get_ts())
-            self.smart_cube_data.extend(data)
-
         # Update state if this is the first partial turn after a scramble
         if self.state == State.SMART_SCRAMBLED:
             # ...and enough time has elapsed since the scramble finished
@@ -820,6 +814,12 @@ class CubeWindow(QMainWindow):
             # Otherwise, restart the timer
             else:
                 self.smart_pending_start = now
+
+        # Record data if we're in a solve
+        if self.smart_cube_data is not None:
+            turn_byte = face * 2 + {-1: 0, 1: 1}[turn]
+            data = struct.pack('<BH', turn_byte, self.get_ts())
+            self.smart_cube_data.extend(data)
 
         # Add up partial turns
         self.turns[face] += turn
