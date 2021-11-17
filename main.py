@@ -32,6 +32,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
         QSlider, QMessageBox, QInputDialog, QMenu, QAction)
 from PyQt5.QtGui import QIcon
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
 
 import bluetooth
 import config
@@ -1140,6 +1142,7 @@ class SessionWidget(QWidget):
         self.session_selector = SessionSelectorDialog(self)
         self.solve_editor = SolveEditorDialog(self)
         self.average_viewer = AverageDialog(self)
+        self.graph_viewer = GraphDialog(self)
 
     def edit_solve(self, row, col):
         solve_id = self.table.item(row, 0).secret_data
@@ -1156,6 +1159,12 @@ class SessionWidget(QWidget):
             n_solves = 5 if col == 1 else 12
             self.average_viewer.update_solve(solve_id, n_solves)
             self.average_viewer.exec()
+
+    def show_graph(self):
+        with db.get_session() as session:
+            sesh = session.query_first(db.Settings).current_session
+            self.graph_viewer.update_data({sesh.name: sesh.solves})
+            self.graph_viewer.exec()
 
     def show_ctx_menu(self, pos):
         self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
@@ -1228,9 +1237,12 @@ class SessionWidget(QWidget):
             if not solves:
                 return
 
-            # Calculate statistics
+            graph_button = QPushButton('Graph')
+            graph_button.pressed.connect(self.show_graph)
 
-            stat_table = [[None, QLabel('current'), QLabel('best')]]
+            stat_table = [[graph_button, QLabel('current'), QLabel('best')]]
+
+            # Calculate statistics
 
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
@@ -1430,6 +1442,34 @@ class AverageDialog(QDialog):
     def sizeHint(self):
         return QSize(400, 100)
 
+class GraphDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.figure = Figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(self.accept)
+
+        make_grid(self, [
+            [self.canvas],
+            [buttons],
+        ])
+
+    def update_data(self, solve_sets, stat='single'):
+        self.figure.clear()
+        plot = self.figure.add_subplot()
+        maxlen = max(len(s) for s in solve_sets.values())
+        for [name, solves] in solve_sets.items():
+            #x = [s.created_at for s in solves]
+            x = range(maxlen - len(solves), maxlen)
+            y = [s.cached_stats[stat] / 1000 if s.cached_stats[stat] else None
+                    for s in solves]
+            plot.plot(x, y, '.', label=name, markersize=1)
+        plot.legend(loc='upper right')
+        self.canvas.draw()
+
 # Based on https://stackoverflow.com/a/43789304
 class ReorderTableWidget(QTableWidget):
     def __init__(self, parent, reorder_cb):
@@ -1512,6 +1552,16 @@ class SessionEditorDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
 
+        # Create context menu items for graphing stats
+        self.ctx_menu = QMenu(self)
+        for s in STAT_AO_COUNTS:
+            # Meh, bind local stat variable
+            def create(stat):
+                action = QAction('Graph %s' % stat, self)
+                action.triggered.connect(lambda: self.graph_selection(stat))
+                self.ctx_menu.addAction(action)
+            create(stat_str(s))
+
         self.table = ReorderTableWidget(self, self.rows_reordered)
         self.table.setColumnCount(4 + len(STAT_AO_COUNTS))
         self.table.setHorizontalHeaderItem(0, cell('Name'))
@@ -1519,6 +1569,8 @@ class SessionEditorDialog(QDialog):
         self.table.setHorizontalHeaderItem(2, cell('# Solves'))
         for [i, stat] in enumerate(STAT_AO_COUNTS):
             self.table.setHorizontalHeaderItem(3+i, cell(stat_str(stat)))
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
@@ -1531,6 +1583,22 @@ class SessionEditorDialog(QDialog):
         make_vbox(self, [self.table, button])
 
         self.session_selector = SessionSelectorDialog(self)
+        self.graph_viewer = GraphDialog(self)
+
+    def show_ctx_menu(self, pos):
+        self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
+
+    def graph_selection(self, stat):
+        with db.get_session() as session:
+            rows = {item.row() for item in self.table.selectedItems()}
+            solve_sets = {}
+            for row in rows:
+                id = self.table.item(row, 0).secret_data[0] 
+                sesh = session.query_first(db.Session, id=id)
+                solve_sets[sesh.name] = sesh.solves
+
+            self.graph_viewer.update_data(solve_sets, stat=stat)
+            self.graph_viewer.exec()
 
     def edit_attr(self, item):
         [id, attr] = item.secret_data
