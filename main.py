@@ -51,6 +51,8 @@ State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
 
 SOLVED_CUBE = solver.Cube()
 
+SCRAMBLE_MOVES = 25
+
 STAT_AO_COUNTS = [1, 5, 12, 100]
 STAT_OUTLIER_PCT = 5
 
@@ -639,8 +641,8 @@ class CubeWindow(QMainWindow):
         all_faces = set(range(6))
         blocked_faces = set()
         turns = list(solver.TURN_STR.values())
-        # Just do 25 random moves for now, not random state scrambles
-        for i in range(25):
+        # Just do N random moves for now, not random state scrambles
+        for i in range(SCRAMBLE_MOVES):
             face = random.choice(list(all_faces - blocked_faces))
             # Only allow one turn of each of an opposing pair of faces in a row.
             # E.g. F B' is allowed, F B' F is not
