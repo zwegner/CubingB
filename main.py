@@ -1237,22 +1237,22 @@ class SessionWidget(QWidget):
             for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
                 label = stat_str(size)
                 mean = calc_ao(solves, 0, size)
+                stats_current[label] = mean
 
                 # Update best stats, recalculating if necessary. This
                 # recalculation is pretty inefficient, but should rarely
                 # happen--I guess just when solves are imported or when the
                 # session is edited
-                stats_current[label] = mean
                 if label not in stats_best:
                     best = None
-                    for i in range(0, len(solves)):
+                    for i in range(1, len(solves)):
                         m = calc_ao(solves, i, size)
                         # Update rolling cache stats
                         if solves[i].cached_stats is None:
                             solves[i].cached_stats = {}
                         solves[i].cached_stats[label] = m
 
-                        if not best or m and m < best:
+                        if not best or (m and m < best):
                             best = m
                     stats_best[label] = best
                 else:
@@ -1260,7 +1260,6 @@ class SessionWidget(QWidget):
                     if not best or mean < best:
                         best = stats_best[label] = mean
 
-                i = stat_idx + 1
                 stat_table.append([QLabel(label), QLabel(ms_str(mean)),
                         QLabel(ms_str(best))])
 

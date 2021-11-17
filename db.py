@@ -19,8 +19,9 @@ import threading
 import sqlalchemy as sa
 from sqlalchemy import (text, Column, Index, Boolean, DateTime, ForeignKey,
         Integer, String, Text, BLOB)
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy.dialects.sqlite import JSON as JSON_
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.mutable import Mutable
 from sqlalchemy.orm import relationship, Session as DBSession, sessionmaker
 
 SESSION_MAKER = None
@@ -37,6 +38,27 @@ SQL_NAMING_CONVENTION = {
 metadata = sa.MetaData(naming_convention=SQL_NAMING_CONVENTION)
 
 Base = declarative_base(metadata=metadata)
+
+# Use SQLAlchemy magic (or "alchemy") to track changes to a JSON object
+# See https://docs.sqlalchemy.org/en/14/orm/extensions/mutable.html
+class MutableJSON(Mutable, dict):
+    @classmethod
+    def coerce(cls, attr, value):
+        if isinstance(value, MutableJSON):
+            return value
+        if isinstance(value, dict):
+            return MutableJSON(value)
+        raise ValueError()
+
+    def __setitem__(self, key, value):
+        self.changed()
+        dict.__setitem__(self, key, value)
+
+    def __delitem__(self, key):
+        self.changed()
+        dict.__delitem__(self, key)
+
+JSON = MutableJSON.as_mutable(JSON_)
 
 # Base class of DB tables to add id/created_at/updated_at columns everywhere
 now = text('datetime("now", "localtime")')
