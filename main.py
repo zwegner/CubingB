@@ -604,6 +604,7 @@ class CubeWindow(QMainWindow):
             self.gl_widget.show()
         elif self.state == State.SMART_SOLVING:
             self.timer_widget.show()
+            self.start_solve_ui()
         elif self.state == State.SMART_VIEWING:
             self.smart_playback_widget.show()
             self.gl_widget.show()
@@ -814,8 +815,8 @@ class CubeWindow(QMainWindow):
                 self.state = State.SMART_SOLVING
                 self.prepare_smart_solve()
                 self.start_solve()
-                # Have to start timers in a qt thread
-                self.schedule_fn.emit(self.start_solve_ui)
+                # Update state in a Qt thread
+                self.schedule_fn.emit(self.update_state_ui)
             # Otherwise, restart the timer
             else:
                 self.smart_pending_start = now
