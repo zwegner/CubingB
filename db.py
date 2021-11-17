@@ -44,7 +44,7 @@ Base = declarative_base(metadata=metadata)
 class MutableJSON(Mutable, dict):
     @classmethod
     def coerce(cls, attr, value):
-        if isinstance(value, MutableJSON):
+        if value is None or isinstance(value, MutableJSON):
             return value
         if isinstance(value, dict):
             return MutableJSON(value)
