@@ -574,8 +574,6 @@ class CubeWindow(QMainWindow):
 
     # Change UI modes based on state
     def update_state_ui(self):
-        self.mark_changed()
-
         # Hide things that are only shown conditionally below
         self.gl_widget.hide()
         self.smart_playback_widget.hide()
@@ -717,24 +715,39 @@ class CubeWindow(QMainWindow):
     def check_solved(self):
         return self.cube == SOLVED_CUBE
 
-    def reset(self):
-        self.cube = solver.Cube()
-        self.turns = [0] * 6
-        self.quat = [1, 0, 0, 0]
-        self.smart_cube_data = None
-        self.smart_data_copy = None
+    def reset(self, playback=False):
+        if playback:
+            self.play_cube = solver.Cube()
+            self.play_turns = [0] * 6
+            self.play_quat = [1, 0, 0, 0]
+        else:
+            self.cube = solver.Cube()
+            self.turns = [0] * 6
+            self.quat = [1, 0, 0, 0]
+            self.smart_cube_data = None
+            self.smart_data_copy = None
 
     # Notify the cube widget that we've updated. We copy all the rendering
     # data to a new object so it can pick up a consistent view at its leisure
-    def mark_changed(self):
+    def mark_changed(self, playback=False):
+        # Ignore smart cube events during a playback
+        if self.state == State.SMART_VIEWING and not playback:
+            return
+
         # XXX copy only the stuff that's modified in place. Don't introduce
         # bugs here later OK
-        cube = self.cube.copy()
-        turns = self.turns[:]
+        if playback:
+            cube = self.play_cube.copy()
+            turns = self.play_turns[:]
+            quat = self.play_quat
+        else:
+            cube = self.cube.copy()
+            turns = self.turns[:]
+            quat = self.quat
 
         self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
         self.scramble_view_widget.set_scramble(self.scramble)
-        self.gl_widget.set_render_data(cube, turns, self.quat)
+        self.gl_widget.set_render_data(cube, turns, quat)
 
     # Make a move and update any state for either a scramble or a solve
     def make_turn(self, face, turn):
@@ -859,27 +872,26 @@ class CubeWindow(QMainWindow):
         quat = None
         for e in events:
             if e.cube:
-                self.cube = e.cube.copy()
-                self.turns = e.turns.copy()
+                self.play_cube = e.cube.copy()
+                self.play_turns = e.turns.copy()
             if e.face is not None:
-                self.turns[e.face] += e.turn
+                self.play_turns[e.face] += e.turn
         # Only show the last rotation, since they're not incremental
         if e.quat:
-            self.quat = e.quat
-        self.mark_changed()
+            self.play_quat = e.quat
+        self.mark_changed(playback=True)
 
     def start_playback(self, solve_id, solve_nb):
         self.state = State.SMART_VIEWING
         with db.get_session() as session:
             solve = session.query_first(db.Solve, id=solve_id)
-            self.reset()
+            self.reset(playback=True)
             self.smart_playback_widget.update_solve(SmartSolve(solve, solve_nb))
         self.update_state_ui()
 
     def stop_playback(self):
         self.state = State.SMART_SCRAMBLING if self.smart_device else State.SCRAMBLE
-        self.reset()
-        self.gen_scramble()
+        self.mark_changed()
         self.update_state_ui()
 
 class SettingsDialog(QDialog):
