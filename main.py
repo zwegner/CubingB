@@ -554,6 +554,15 @@ class CubeWindow(QMainWindow):
         elif self.state == State.SOLVING:
             self.state = State.SCRAMBLE
             self.finish_solve(dnf=event.key() == Qt.Key.Key_Escape)
+        # Escape can DNF a smart solve
+        elif event.key() == Qt.Key.Key_Escape and self.state == State.SMART_SOLVING:
+            self.state = State.SMART_SCRAMBLING
+            # Move smart data buffer to a different variable so UI
+            # thread can read it, and remove the buffer so later events don't
+            # try and modify it
+            self.smart_data_copy = self.smart_cube_data
+            self.smart_cube_data = None
+            self.finish_solve(dnf=True)
         else:
             event.ignore()
             return
