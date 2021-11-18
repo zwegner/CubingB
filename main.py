@@ -453,6 +453,9 @@ class CubeWindow(QMainWindow):
         self.smart_playback_widget = SmartPlaybackWidget(self)
         self.bt_status_widget = BluetoothStatusWidget(self)
 
+        # Initialize session state
+        self.session_widget.trigger_update()
+
         # Set up bluetooth. This doesn't actually scan or anything yet
         self.bt_handler = bluetooth.BluetoothHandler(self)
 
@@ -584,8 +587,6 @@ class CubeWindow(QMainWindow):
 
         self.timer_widget.set_pending(False)
 
-        self.session_widget.trigger_update()
-
         if self.state == State.SCRAMBLE:
             self.scramble_widget.show()
             self.scramble_view_widget.show()
@@ -707,6 +708,9 @@ class CubeWindow(QMainWindow):
                     scramble=' '.join(self.scramble),
                     time_ms=int(self.final_time * 1000), dnf=dnf,
                     smart_data_raw=data)
+
+        # Update session state
+        self.session_widget.trigger_update()
 
         self.gen_scramble()
 
