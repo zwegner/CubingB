@@ -188,17 +188,17 @@ def render_cube(cube, turns):
             # Render all the outside faces of this cubie
             for [color, quad] in zip(cubie, quads):
                 color = COLORS[color]
-                glColor3fv(color)
+                glColor3f(*color)
 
                 for vertex in quad:
-                    glVertex3fv(vertex)
+                    glVertex3f(*vertex)
 
             # Render inside faces: these are at the end of the list
             # after the visible faces
-            glColor3fv(COLORS[6])
+            glColor3f(*COLORS[6])
             for quad in quads[len(cubie):]:
                 for vertex in quad:
-                    glVertex3fv(vertex)
+                    glVertex3f(*vertex)
 
             glEnd()
 
