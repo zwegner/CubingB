@@ -333,6 +333,7 @@ class SmartSolve:
                 # 9 incremental turns make a full quarter turn
                 if abs(turns[face]) >= 9:
                     turn = turns[face] // 9
+                    turns[face] = 0
 
                     # Zero out everything but the opposite face as a sanity
                     # check. Use a threshold so that a partial turn doesn't
@@ -406,11 +407,12 @@ class SmartSolve:
         self.base_quat = base_quat
         self.events = new_events
         self.solve_nb = solve_nb
-        self.reconstruction = ' '.join(moves)
+        self.reconstruction = moves
         self.session_name = solve.session.name
 
-        scrambled = solver.Cube().run_alg(self.scramble)
-        assert scrambled.run_alg(self.reconstruction) == SOLVED_CUBE
+        c = solver.Cube().run_alg(self.scramble)
+        c.run_alg(' '.join(self.reconstruction))
+        self.solved = (c == SOLVED_CUBE)
 
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
