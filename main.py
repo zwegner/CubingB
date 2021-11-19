@@ -555,7 +555,8 @@ class CubeWindow(QMainWindow):
         # Any key stops a solve
         elif self.state == State.SOLVING:
             self.state = State.SCRAMBLE
-            self.finish_solve(dnf=event.key() == Qt.Key.Key_Escape)
+            final_time = self.stop_solve(dnf=event.key() == Qt.Key.Key_Escape)
+            self.stop_solve_ui(final_time)
         # Escape can DNF a smart solve
         elif event.key() == Qt.Key.Key_Escape and self.state == State.SMART_SOLVING:
             self.state = State.SMART_SCRAMBLING
@@ -564,7 +565,8 @@ class CubeWindow(QMainWindow):
             # try and modify it
             self.smart_data_copy = self.smart_cube_data
             self.smart_cube_data = None
-            self.finish_solve(dnf=True)
+            final_time = self.stop_solve(dnf=True)
+            self.stop_solve_ui(final_time)
         else:
             event.ignore()
             return
@@ -584,7 +586,8 @@ class CubeWindow(QMainWindow):
             event.ignore()
 
     def update_timer(self):
-        self.timer_widget.update_time(time.time() - self.start_time, 1)
+        if self.start_time is not None:
+            self.timer_widget.update_time(time.time() - self.start_time, 1)
 
     # Change UI modes based on state
     def update_state_ui(self):
@@ -646,7 +649,6 @@ class CubeWindow(QMainWindow):
         self.solve_moves = []
         self.start_time = None
         self.end_time = None
-        self.final_time = None
 
         all_faces = set(range(6))
         blocked_faces = set()
@@ -682,7 +684,6 @@ class CubeWindow(QMainWindow):
     def start_solve(self):
         self.start_time = time.time()
         self.end_time = None
-        self.final_time = None
 
     # Start UI timer to update timer view. This needs to be called from a Qt thread,
     # so it's scheduled separately when a bluetooth event comes in
@@ -691,16 +692,10 @@ class CubeWindow(QMainWindow):
         self.timer.timeout.connect(self.update_timer)
         self.timer.start(100)
 
-    def finish_solve(self, dnf=False):
+    def stop_solve(self, dnf=False):
         self.end_time = time.time()
-        self.final_time = self.end_time - self.start_time
+        final_time = self.end_time - self.start_time
         self.start_time = None
-
-        # Stop UI timer
-        if self.timer:
-            self.timer.stop()
-            self.timer = None
-            self.timer_widget.update_time(self.final_time, 3)
 
         # Update database
         with db.get_session() as session:
@@ -717,13 +712,28 @@ class CubeWindow(QMainWindow):
 
             session.insert(db.Solve, session=sesh,
                     scramble=' '.join(self.scramble),
-                    time_ms=int(self.final_time * 1000), dnf=dnf,
+                    time_ms=int(final_time * 1000), dnf=dnf,
                     smart_data_raw=data)
+
+        self.gen_scramble()
+        return final_time
+
+    # Start UI timer to update timer view. This needs to be called from a Qt thread,
+    # so it's scheduled separately when a bluetooth event comes in
+    def start_solve_ui(self):
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(100)
+
+    def stop_solve_ui(self, final_time):
+        # Stop UI timer
+        if self.timer:
+            self.timer.stop()
+            self.timer = None
+            self.timer_widget.update_time(final_time, 3)
 
         # Update session state
         self.session_widget.trigger_update()
-
-        self.gen_scramble()
 
     # Smart cube stuff
 
@@ -808,7 +818,8 @@ class CubeWindow(QMainWindow):
                 self.smart_data_copy = self.smart_cube_data
                 self.smart_cube_data = None
 
-                self.schedule_fn.emit(self.finish_solve)
+                final_time = self.stop_solve()
+                self.schedule_fn_args.emit(self.stop_solve_ui, (final_time,))
 
         # XXX handle after-solve-but-pre-scramble moves
 
