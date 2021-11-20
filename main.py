@@ -348,7 +348,7 @@ class SmartSolve:
 
                     # Merge moves of the same made within a short time window
                     # for purposes of reconstruction
-                    if face == last_face and ts - last_ts < 500 and last_turn + turn:
+                    if face == last_face and ts - last_ts < 500 and (last_turn + turn) % 4:
                         last_turn += turn
                         last_turn %= 4
                         moves[-1] = (solver.FACE_STR[orient[face]] +
