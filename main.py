@@ -782,8 +782,18 @@ class CubeWindow(QMainWindow):
         old_state = self.state
         # Scrambling: see if this is the next move of the scramble
         if self.state == State.SMART_SCRAMBLING:
-            s_face = self.scramble_left[0][0]
-            s_turn = solver.INV_TURN_STR[self.scramble_left[0][1:]]
+            # Failsafe for weird bugs: if the cube is scrambled already, but we're
+            # still in scrambling mode for some reason, allow the inverse move
+            # to get added to the scramble (like an incorrect scramble move).
+            # This shouldn't be necessary, but there have been two or three other
+            # bugs that indirectly cause an IndexError below and it's annoying.
+            # Belt and suspenders.
+            if not self.scramble_left:
+                s_face = s_turn = None
+            else:
+                s_face = self.scramble_left[0][0]
+                s_turn = solver.INV_TURN_STR[self.scramble_left[0][1:]]
+
             if face == s_face:
                 s_turn = (s_turn - turn) % 4
                 if not s_turn:
