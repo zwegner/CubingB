@@ -103,6 +103,7 @@ class Settings(Base, NiceBase):
     __tablename__ = 'settings'
     current_session_id = Column(Integer, ForeignKey(Session.id))
     current_session = relationship('Session')
+    auto_calibrate = Column(Boolean, default=False)
 
 # Make an object usable outside of a DB session
 def make_transient(obj):

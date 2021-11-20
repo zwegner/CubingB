@@ -543,7 +543,7 @@ class CubeWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_C:
-            self.gl_widget.base_quat = quat_invert(self.gl_widget.quat)
+            self.calibrate_cube()
         elif event.key() == Qt.Key.Key_R:
             self.reset()
         elif event.key() == Qt.Key.Key_Space and self.state == State.SCRAMBLE:
@@ -588,6 +588,9 @@ class CubeWindow(QMainWindow):
     def update_timer(self):
         if self.start_time is not None:
             self.timer_widget.update_time(time.time() - self.start_time, 1)
+
+    def calibrate_cube(self):
+        self.gl_widget.base_quat = quat_invert(self.gl_widget.quat)
 
     # Change UI modes based on state
     def update_state_ui(self):
@@ -782,6 +785,14 @@ class CubeWindow(QMainWindow):
         old_state = self.state
         # Scrambling: see if this is the next move of the scramble
         if self.state == State.SMART_SCRAMBLING:
+            # If this is the first move of the scramble, check if
+            # we should auto-calibrate the cube
+            if self.scramble_left == self.scramble:
+                with db.get_session() as session:
+                    settings = session.query_first(db.Settings)
+                    if settings.auto_calibrate:
+                        self.calibrate_cube()
+
             # Failsafe for weird bugs: if the cube is scrambled already, but we're
             # still in scrambling mode for some reason, allow the inverse move
             # to get added to the scramble (like an incorrect scramble move).
@@ -963,7 +974,26 @@ class SettingsDialog(QDialog):
 
         reset_button = QPushButton('Reset Camera')
         reset_button.pressed.connect(self.parent.gl_widget.reset_camera)
-        make_grid(self, sliders + [[reset_button], [buttons]])
+
+        # Initialize persistent settings
+        with db.get_session() as session:
+            settings = session.query_first(db.Settings)
+
+            auto_cal = QCheckBox('Automatically calibrate smart cube gyro '
+                    'when beginning a scramble')
+            auto_cal.setChecked(settings.auto_calibrate)
+            auto_cal.stateChanged.connect(self.set_auto_calibrate)
+
+        make_grid(self, sliders + [
+            [reset_button],
+            [auto_cal],
+            [buttons],
+        ])
+
+    def set_auto_calibrate(self, value):
+        with db.get_session() as session:
+            settings = session.query_first(db.Settings)
+            settings.auto_calibrate = bool(value)
 
     def update_rotation(self, axis, value):
         # Icky: reach into parent then into gl_widget, then update it
