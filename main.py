@@ -1204,7 +1204,7 @@ class ScrambleViewWidget(QFrame):
 class SessionWidget(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
-        self.setStyleSheet('SessionWidget { max-width: 300px; }')
+        self.setStyleSheet('SessionWidget { max-width: 350px; }')
 
         self.label = QLabel('Session:')
         self.selector = QComboBox()
@@ -1218,6 +1218,7 @@ class SessionWidget(QWidget):
         self.ctx_menu.addAction(action)
 
         self.table = QTableWidget()
+        self.table.setStyleSheet('font: 16px')
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderItem(0, cell('Time'))
         self.table.setHorizontalHeaderItem(1, cell('ao5'))
@@ -1325,6 +1326,7 @@ class SessionWidget(QWidget):
             # Clear the stats
             self.layout.removeWidget(self.stats)
             self.stats = QWidget()
+            self.stats.setStyleSheet('QLabel { font: 16px; }')
             self.layout.insertWidget(1, self.stats)
 
             if not solves:
