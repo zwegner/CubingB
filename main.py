@@ -908,6 +908,11 @@ class CubeWindow(QMainWindow):
         self.mark_changed(playback=True)
 
     def start_playback(self, solve_id, solve_nb):
+        # Save the state we're in so we can go back after playback. Make sure
+        # to not overwrite it if we're already in playback mode
+        if self.state != State.SMART_VIEWING:
+            self.prev_state = self.state
+
         self.state = State.SMART_VIEWING
         with db.get_session() as session:
             solve = session.query_first(db.Solve, id=solve_id)
@@ -916,7 +921,8 @@ class CubeWindow(QMainWindow):
         self.update_state_ui()
 
     def stop_playback(self):
-        self.state = State.SMART_SCRAMBLING if self.smart_device else State.SCRAMBLE
+        self.state = self.prev_state
+        self.prev_state = None
         self.mark_changed()
         self.update_state_ui()
 
