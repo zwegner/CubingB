@@ -20,6 +20,7 @@
 import collections
 import enum
 import gzip
+import math
 import random
 import struct
 import sys
@@ -120,6 +121,111 @@ def calc_ao(solves, start, size):
         mean = sum(times) / len(times)
 
     return mean
+
+# Calculate the aoX for all solves. This is more efficient (at least for bigger X)
+# since it's incrementally updated, but the code is a bit annoying. We use a
+# binary search on the sorted solves within the sliding window, so overall the
+# runtime is O(n log size). This is also slightly weird in that the solves are
+# ordered new-to-old, so process them with the sliding window ahead of the current
+# solve rather than behind.
+def calc_rolling_ao(solves, all_times, size):
+    if len(solves) < size:
+        for _ in range(len(solves)):
+            yield None
+        return
+
+    outliers = (size * STAT_OUTLIER_PCT + 99) // 100
+    low = outliers
+    high = size - outliers
+    n_samples = high - low
+
+    # Build initial list
+    times = list(sorted(all_times[:size]))
+
+    # Binary search helper. Slightly annoying in that it needs to return the
+    # insertion position for new elements
+    def find(i):
+        lo = 0
+        hi = len(times) - 1
+        while lo < hi:
+            mid = (hi + lo + 1) // 2
+            if times[mid] > i:
+                hi = mid - 1
+            elif times[mid] < i:
+                lo = mid
+            else:
+                return mid
+        if times[lo] < i:
+            return lo + 1
+        return lo
+
+    # Keep track of the sum of all solve times within the window
+    total = sum(times[low:high])
+    yield total / n_samples
+
+    for i in range(len(solves) - size):
+        assert not math.isnan(total)
+        # Remove old solve time
+        old = all_times[i]
+        o = find(old)
+        assert times[o] == old, (times, old, o)
+        times.pop(o)
+
+        # Insert new solve
+        new = all_times[i + size]
+        n = find(new)
+        times.insert(n, new)
+
+        # Recalculate total if the average is moving from DNF to non-DNF. If
+        # this happens a lot, it negates the speed advantage of this rolling
+        # calculation. I guess that's punishment for having too many DNFs.
+        if total == INF and times[high - 1] < INF:
+            total = sum(times[low:high])
+            yield total / n_samples
+            continue
+
+        # Update total based on what solves moved in/out the window. There are
+        # 9 cases, with old and new each in high/mid/low
+
+        # Old in low
+        if o < low:
+            if n < low:
+                pass
+            elif n < high:
+                total += new
+                total -= times[low - 1]
+            else:
+                total += times[high - 1]
+                total -= times[low - 1]
+        # Old in mid
+        elif o < high:
+            total -= old
+            if n < low:
+                total += times[low]
+            elif n < high:
+                total += new
+            else:
+                total += times[high - 1]
+        # Old in high
+        else:
+            if n < low:
+                total += times[low]
+                total -= times[high]
+            elif n < high:
+                total += new
+                total -= times[high]
+            else:
+                pass
+
+        # Guard against inf-inf
+        if math.isnan(total):
+            total = INF
+
+        yield total / n_samples
+
+    # Yield None for all the solves before reaching the aoX
+    for _ in range(size - 1):
+        yield None
 
 def get_ao_str(solves, start, size):
     if len(solves) - start < size or size == 1:
@@ -1339,6 +1445,8 @@ class SessionWidget(QWidget):
 
             # Calculate statistics
 
+            all_times = [solve_time(s) for s in solves]
+
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
             for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
@@ -1346,14 +1454,20 @@ class SessionWidget(QWidget):
                 mean = calc_ao(solves, 0, size)
                 stats_current[label] = mean
 
-                # Update best stats, recalculating if necessary. This
-                # recalculation is pretty inefficient, but should rarely
-                # happen--I guess just when solves are imported or when the
-                # session is edited
+                # Update best stats, recalculating if necessary
                 if label not in stats_best:
                     best = None
-                    for i in range(1, len(solves)):
-                        m = calc_ao(solves, i, size)
+
+                    averages = None
+                    if size > 1:
+                        averages = iter(calc_rolling_ao(solves, all_times, size))
+
+                    for i in range(len(solves)):
+                        if size > 1:
+                            m = next(averages)
+                        else:
+                            m = all_times[i]
+
                         # Update rolling cache stats
                         if solves[i].cached_stats is None:
                             solves[i].cached_stats = {}
