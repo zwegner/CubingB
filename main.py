@@ -1038,6 +1038,11 @@ class BluetoothConnectionDialog(QDialog):
     def sizeHint(self):
         return QSize(400, 400)
 
+    # Automatically start a scan when the settings are opened
+    def exec(self):
+        self.start_scan()
+        return super().exec()
+
     def start_scan(self):
         self.devices = {}
         self.bt_handler.start_bt()
