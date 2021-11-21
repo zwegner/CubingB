@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QWidget, QOpenGLWidget, QLabel, QTableWidget, QTableWidgetItem,
         QSizePolicy, QGridLayout, QComboBox, QDialog, QDialogButtonBox,
         QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
-        QSlider, QMessageBox, QInputDialog, QMenu, QAction)
+        QSlider, QMessageBox, QInputDialog, QMenu, QAction, QPlainTextEdit)
 from PyQt5.QtGui import QIcon
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -1518,12 +1518,15 @@ class SolveEditorDialog(QDialog):
         self.result_label = QLabel()
         self.scramble_label = QLabel()
         self.scramble_label.setWordWrap(True)
+        self.notes = QPlainTextEdit()
+        self.notes.textChanged.connect(lambda: self.make_edit('notes',
+                self.notes.toPlainText()))
         self.smart_widget = None
 
         self.dnf = QCheckBox('DNF')
-        self.dnf.stateChanged.connect(lambda v: self.make_edit('dnf', v))
+        self.dnf.stateChanged.connect(lambda v: self.make_edit('dnf', bool(v)))
         self.plus_2 = QCheckBox('+2')
-        self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', v))
+        self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', bool(v)))
 
         delete = QPushButton('Delete')
         delete.pressed.connect(self.delete_solve)
@@ -1535,6 +1538,7 @@ class SolveEditorDialog(QDialog):
             [QLabel('Time:'), self.time_label],
             [QLabel('Result:'), self.result_label],
             [QLabel('Scramble:'), self.scramble_label],
+            [QLabel('Notes:'), self.notes],
             [QLabel('Smart data:'), self.smart_widget],
             [self.dnf, self.plus_2],
             [delete, merge],
@@ -1549,7 +1553,7 @@ class SolveEditorDialog(QDialog):
         with db.get_session() as session:
             # Edit solve
             solve = session.query_first(db.Solve, id=self.solve_id)
-            setattr(solve, key, bool(value))
+            setattr(solve, key, value)
 
             self.result_label.setText(solve_time_str(solve))
 
@@ -1576,6 +1580,7 @@ class SolveEditorDialog(QDialog):
             self.dnf.setChecked(solve.dnf)
             self.plus_2.setChecked(solve.plus_2)
             self.session_label.setText(solve.session.name)
+            self.notes.setPlainText(solve.notes)
             self.scramble_label.setText(solve.scramble)
             self.time_label.setText(str(solve.created_at))
             self.result_label.setText(solve_time_str(solve))
@@ -1589,7 +1594,7 @@ class SolveEditorDialog(QDialog):
                         lambda: self.start_playback(solve_id, solve_nb))
             else:
                 self.smart_widget = QLabel('None')
-            self.layout.addWidget(self.smart_widget, 4, 1)
+            self.layout.addWidget(self.smart_widget, 5, 1)
         self.update()
 
     def delete_solve(self):
