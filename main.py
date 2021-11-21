@@ -34,8 +34,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QVBoxLayout
         QAbstractItemView, QHeaderView, QFrame, QCheckBox, QPushButton,
         QSlider, QMessageBox, QInputDialog, QMenu, QAction, QPlainTextEdit)
 from PyQt5.QtGui import QIcon
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
 
 import bluetooth
 import config
@@ -561,9 +559,6 @@ class CubeWindow(QMainWindow):
         self.smart_playback_widget = SmartPlaybackWidget(self)
         self.bt_status_widget = BluetoothStatusWidget(self)
 
-        # Initialize session state
-        self.session_widget.trigger_update()
-
         # Set up bluetooth. This doesn't actually scan or anything yet
         self.bt_handler = bluetooth.BluetoothHandler(self)
 
@@ -620,12 +615,16 @@ class CubeWindow(QMainWindow):
         self.setFocusPolicy(Qt.StrongFocus)
 
         # Wire up signals
-        self.schedule_fn.connect(self.run_scheduled_fn)
-        self.schedule_fn_args.connect(self.run_scheduled_fn_args)
+        self.schedule_fn.connect(self.run_scheduled_fn, type=Qt.QueuedConnection)
+        self.schedule_fn_args.connect(self.run_scheduled_fn_args,
+                type=Qt.QueuedConnection)
         self.playback_events.connect(self.play_events)
         self.bt_scan_result.connect(self.bt_connection_dialog.update_device)
         self.bt_status_update.connect(self.bt_status_widget.update_status)
         self.bt_connected.connect(self.got_bt_connection)
+
+        # Initialize session state
+        self.schedule_fn.emit(self.session_widget.trigger_update)
 
     def run_scheduled_fn(self, fn):
         fn()
@@ -1342,7 +1341,7 @@ class SessionWidget(QWidget):
         self.session_selector = SessionSelectorDialog(self)
         self.solve_editor = SolveEditorDialog(self)
         self.average_viewer = AverageDialog(self)
-        self.graph_viewer = GraphDialog(self)
+        self.graph_viewer = None
 
     def edit_solve(self, row, col):
         solve_id = self.table.item(row, 0).secret_data
@@ -1363,6 +1362,8 @@ class SessionWidget(QWidget):
     def show_graph(self):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
+            if self.graph_viewer is None:
+                self.graph_viewer = GraphDialog(self)
             self.graph_viewer.update_data({sesh.name: sesh.solves})
             self.graph_viewer.exec()
 
@@ -1436,6 +1437,7 @@ class SessionWidget(QWidget):
             self.layout.insertWidget(1, self.stats)
 
             if not solves:
+                self.update()
                 return
 
             graph_button = QPushButton('Graph')
@@ -1504,6 +1506,8 @@ class SessionWidget(QWidget):
                         cell(ms_str(stats.get('ao5'))))
                 self.table.setItem(i, 2,
                         cell(ms_str(stats.get('ao12'))))
+
+            self.update()
 
 class SolveEditorDialog(QDialog):
     def __init__(self, parent):
@@ -1661,6 +1665,11 @@ GRAPH_TYPES = ['adaptive', 'date', 'count']
 class GraphDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
+
+        # Only import this crap here since it's pretty slow to import, and
+        # this widget is instantiated lazily, all to improve startup time
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
 
         self.title = QLabel()
         self.title.setStyleSheet('font: 24px')
@@ -1870,7 +1879,7 @@ class SessionEditorDialog(QDialog):
         make_vbox(self, [self.table, button])
 
         self.session_selector = SessionSelectorDialog(self)
-        self.graph_viewer = GraphDialog(self)
+        self.graph_viewer = None
 
     def show_ctx_menu(self, pos):
         self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
@@ -1884,6 +1893,8 @@ class SessionEditorDialog(QDialog):
                 sesh = session.query_first(db.Session, id=id)
                 solve_sets[sesh.name] = sesh.solves
 
+            if self.graph_viewer is None:
+                self.graph_viewer = GraphDialog(self)
             self.graph_viewer.update_data(solve_sets, stat=stat)
             self.graph_viewer.exec()
 
