@@ -84,6 +84,8 @@ class Cube:
     def copy(self):
         return Cube(self.centers, self.edges, self.corners)
 
+SOLVED_CUBE = Cube()
+
 # Metabrogramming. Generate function for each of the turn and rotate moves.
 # This is pretty messy code, just the first random crap I hacked up that worked
 TURNS = []
