@@ -45,6 +45,7 @@ SLICE_ROT_FLIP = [1, 1, 0]
 COLOR_STR = ['white', 'yellow', 'red', 'orange', 'green', 'blue']
 SLICE_STR = 'EMS'
 FACE_STR = 'UDRLFB'
+INV_FACE_STR = {f: i for [i, f] in enumerate(FACE_STR)}
 ROTATE_STR = 'yxz'
 TURN_STR = {-1: "'", 1: '', 2: '2', 3: "'"}
 INV_TURN_STR = {v: k for [k, v] in TURN_STR.items()}
@@ -192,15 +193,22 @@ def {name}(cn, e, c):
 
 gen_turns()
 
+def move_str(face, turn):
+    return FACE_STR[face] + TURN_STR[turn]
+
+def parse_move(move):
+    return (INV_FACE_STR[move[0]], INV_TURN_STR[move[1:]])
+
+def parse_rot(m):
+    m = m.replace("2'", '2')
+    if m.endswith("'"):
+        return 0
+    elif m.endswith('2'):
+        return 1
+    return 2
+
 def parse_alg(alg):
     moves = []
-
-    def parse_rot(m):
-        if move.endswith("'"):
-            return 0
-        elif move.endswith('2'):
-            return 1
-        return 2
 
     for move in alg.split():
         rot = rn = face = n = f2 = n2 = None

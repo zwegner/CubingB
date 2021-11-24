@@ -403,7 +403,7 @@ class CubeWindow(QMainWindow):
 
         all_faces = set(range(6))
         blocked_faces = set()
-        turns = list(set(solver.TURN_STR.values()))
+        turns = [-1, 1, 2]
         # Just do N random moves for now, not random state scrambles
         for i in range(SCRAMBLE_MOVES):
             face = random.choice(list(all_faces - blocked_faces))
@@ -413,9 +413,8 @@ class CubeWindow(QMainWindow):
                 blocked_faces = set()
             blocked_faces.add(face)
 
-            face = solver.FACE_STR[face]
-            move = face + random.choice(turns)
-            self.scramble.append(move)
+            turn = random.choice(turns)
+            self.scramble.append(solver.move_str(face, turn))
         self.scramble_left = self.scramble[:]
 
         self.mark_changed()
@@ -527,8 +526,7 @@ class CubeWindow(QMainWindow):
 
     # Make a move and update any state for either a scramble or a solve
     def make_turn(self, face, turn):
-        face = solver.FACE_STR[face]
-        alg = face + solver.TURN_STR[turn]
+        alg = solver.move_str(face, turn)
         self.cube.run_alg(alg)
         old_state = self.state
         # Scrambling: see if this is the next move of the scramble
@@ -550,8 +548,7 @@ class CubeWindow(QMainWindow):
             if not self.scramble_left:
                 s_face = s_turn = None
             else:
-                s_face = self.scramble_left[0][0]
-                s_turn = solver.INV_TURN_STR[self.scramble_left[0][1:]]
+                [s_face, s_face] = solver.parse_move(self.scramble_left[0])
 
             if face == s_face:
                 s_turn = (s_turn - turn) % 4
@@ -564,18 +561,15 @@ class CubeWindow(QMainWindow):
                         # solve in case they overturn
                         self.smart_pending_start = time.time()
                 else:
-                    new_turn = solver.TURN_STR[s_turn]
-                    self.scramble_left[0] = face + new_turn
+                    self.scramble_left[0] = solver.move_str(face, s_turn)
             else:
-                new_turn = solver.TURN_STR[-turn % 4]
-                self.scramble_left.insert(0, face + new_turn)
+                self.scramble_left.insert(0, solver.move_str(face, -turn % 4))
         # If we're in a scrambled state, this move needs to move us to
         # unscrambled. If it started a solve, that would be handled earlier in
         # make_turn(), which checks the debounce timer. So if we're here
         # and in a scrambled state, add the inverse turn back to the scramble.
         elif self.state == State.SMART_SCRAMBLED:
-            new_turn = solver.TURN_STR[-turn % 4]
-            self.scramble_left.insert(0, face + new_turn)
+            self.scramble_left.insert(0, solver.move_str(face, -turn % 4))
             self.state = State.SMART_SCRAMBLING
         # Solving: check for a complete solve
         elif self.state == State.SMART_SOLVING:

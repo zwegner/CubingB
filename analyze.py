@@ -251,15 +251,14 @@ class SmartSolve:
                         if f != opp and abs(turns[f]) > 4:
                             turns[f] = 0
 
-                    alg = solver.FACE_STR[face] + solver.TURN_STR[turn]
+                    alg = solver.move_str(face, turn)
 
                     # Merge moves of the same made within a short time window
                     # for purposes of reconstruction
                     if face == last_face and ts - last_ts < 500 and (last_turn + turn) % 4:
                         last_turn += turn
                         last_turn %= 4
-                        moves[-1] = (solver.FACE_STR[orient[face]] +
-                                solver.TURN_STR[last_turn])
+                        moves[-1] = solver.move_str(orient[face], last_turn)
                     # Likewise with opposite moves into slice moves, but with a
                     # smaller window
                     elif (face ^ 1 == last_face and turn == -last_turn and
@@ -295,8 +294,7 @@ class SmartSolve:
                         last_face = face
                         last_turn = turn
                         # Look up current name of given face based on rotations
-                        moves.append(solver.FACE_STR[orient[face]] +
-                                solver.TURN_STR[turn])
+                        moves.append(solver.move_str(orient[face], turn))
 
                     last_ts = ts
                     if (last_slice_face is not None and
