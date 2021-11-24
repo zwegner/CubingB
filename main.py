@@ -403,7 +403,7 @@ class CubeWindow(QMainWindow):
 
         all_faces = set(range(6))
         blocked_faces = set()
-        turns = list(solver.TURN_STR.values())
+        turns = list(set(solver.TURN_STR.values()))
         # Just do N random moves for now, not random state scrambles
         for i in range(SCRAMBLE_MOVES):
             face = random.choice(list(all_faces - blocked_faces))
