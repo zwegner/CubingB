@@ -19,6 +19,7 @@
 
 import enum
 import gzip
+import os
 import random
 import struct
 import sys
@@ -31,7 +32,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QOpenGLWidget,
         QComboBox, QDialog, QDialogButtonBox, QAbstractItemView, QHeaderView,
         QFrame, QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog,
         QMenu, QAction, QPlainTextEdit)
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QFont, QFontDatabase
 
 import analyze
 import bluetooth
@@ -244,7 +245,7 @@ class CubeWindow(QMainWindow):
 
         # Annoying: set up style here in the parent, so it can be overridden
         # in children
-        self.setStyleSheet('TimerWidget { font: 240px Courier; }'
+        self.setStyleSheet('TimerWidget { font: 240px; }'
                 'BluetoothStatusWidget { font: 24px; '
                 '   color: #FFF; background: rgb(80,80,255); padding: 5px; }'
                 '#top > * { padding-right: 100px; }')
@@ -863,6 +864,10 @@ class TimerWidget(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.update_time(0, 3)
+
+        path = os.path.abspath('./rsrc/lcd.ttf')
+        font = QFontDatabase.addApplicationFont(path)
+        self.setFont(QFont(QFontDatabase.applicationFontFamilies(font)[0]))
 
     def set_pending(self, pending):
         color = 'red' if pending else 'black'
