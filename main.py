@@ -1083,7 +1083,7 @@ class SessionWidget(QWidget):
 
             all_times = [solve_time(s) for s in solves]
 
-            graph_icon = QIcon('pix/graph.svg')
+            graph_icon = QIcon('rsrc/graph.svg')
 
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
@@ -1800,7 +1800,7 @@ class GLWidget(QOpenGLWidget):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setApplicationName('CubingB')
-    icon = QIcon('pix/cubingb-icon-small.png')
+    icon = QIcon('rsrc/cubingb-icon-small.png')
     app.setWindowIcon(icon)
     window = CubeWindow()
     window.show()

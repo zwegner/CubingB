@@ -1,4 +1,4 @@
-![icon](pix/cubingb-icon-small.png)
+![icon](rsrc/cubingb-icon-small.png)
 
 CubingB
 =======
@@ -17,7 +17,7 @@ This is just a hobby project written for my own use, so don't expect an easy
 installation experience or much technical support. If you're not a programmer
 that knows how to install Python packages, don't bug me with issues yet, please.
 
-![icon](pix/screenshot.png)
+![icon](rsrc/screenshot.png)
 
 Features
 ---
