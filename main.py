@@ -18,6 +18,7 @@
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
 import enum
+import functools
 import gzip
 import os
 import random
@@ -691,8 +692,8 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok)
         buttons.accepted.connect(self.accept)
 
-        # Ugh python scoping etc etc, bind the local axis variable
-        def create(axis):
+        sliders = []
+        for axis in 'xyz':
             slider = QSlider()
             slider.setMinimum(-180)
             slider.setMaximum(180)
@@ -702,11 +703,9 @@ class SettingsDialog(QDialog):
             slider.setValue(getattr(self.parent.gl_widget, attr))
 
             slider.setOrientation(Qt.Horizontal)
-            slider.valueChanged.connect(lambda v: self.update_rotation(axis, v))
-            return slider
-
-        sliders = [[QLabel('Rotation %s:' % axis.upper()), create(axis)]
-                for axis in 'xyz']
+            update = functools.partial(self.update_rotation, axis)
+            slider.valueChanged.connect(update)
+            sliders.append([QLabel('Rotation %s:' % axis.upper()), slider])
 
         reset_button = QPushButton('Reset Camera')
         reset_button.pressed.connect(self.parent.gl_widget.reset_camera)
@@ -1086,12 +1085,12 @@ class SessionWidget(QWidget):
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
             for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
-                label = stat_str(size)
+                stat = stat_str(size)
                 mean = analyze.calc_ao(all_times, 0, size)
-                stats_current[label] = mean
+                stats_current[stat] = mean
 
                 # Update best stats, recalculating if necessary
-                if label not in stats_best:
+                if stat not in stats_best:
                     best = None
 
                     averages = None
@@ -1108,23 +1107,20 @@ class SessionWidget(QWidget):
                         # Update rolling cache stats
                         if solves[i].cached_stats is None:
                             solves[i].cached_stats = {}
-                        solves[i].cached_stats[label] = m
+                        solves[i].cached_stats[stat] = m
 
                         if not best or (m and m < best):
                             best = m
-                    stats_best[label] = best
+                    stats_best[stat] = best
                 else:
-                    best = stats_best[label]
+                    best = stats_best[stat]
                     if not best or mean < best:
-                        best = stats_best[label] = mean
-
-                # Ugh python scoping
-                bind = lambda stat: lambda: self.show_graph(stat)
+                        best = stats_best[stat] = mean
 
                 graph_button = QPushButton(graph_icon, '')
                 graph_button.setStyleSheet('border: none;')
-                graph_button.pressed.connect(bind(label))
-                stat_table.append([QLabel(label), QLabel(ms_str(mean)),
+                graph_button.pressed.connect(functools.partial(self.show_graph, stat))
+                stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
                         QLabel(ms_str(best)), graph_button])
 
             make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
@@ -1386,12 +1382,10 @@ class SessionEditorDialog(QDialog):
         # Create context menu items for graphing stats
         self.ctx_menu = QMenu(self)
         for s in STAT_AO_COUNTS:
-            # Meh, bind local stat variable
-            def create(stat):
-                action = QAction('Graph %s' % stat, self)
-                action.triggered.connect(lambda: self.graph_selection(stat))
-                self.ctx_menu.addAction(action)
-            create(stat_str(s))
+            stat = stat_str(s)
+            action = QAction('Graph %s' % stat, self)
+            action.triggered.connect(functools.partial(self.graph_selection, stat))
+            self.ctx_menu.addAction(action)
 
         self.table = ReorderTableWidget(self, self.rows_reordered)
         self.table.setColumnCount(4 + len(STAT_AO_COUNTS))
@@ -1512,13 +1506,9 @@ class SessionEditorDialog(QDialog):
                     self.table.setItem(i, 3+j,
                             cell(ms_str(stats.get(stat))))
                 offset = 3 + len(STAT_AO_COUNTS)
-                # Ugh, Python scoping: create a local function to capture the
-                # current session ID
-                def bind_button(s_id):
-                    button = QPushButton('Merge...')
-                    button.pressed.connect(lambda: self.merge_sessions(s_id))
-                    return button
-                self.table.setCellWidget(i, offset+0, bind_button(sesh.id))
+                button = QPushButton('Merge...')
+                button.pressed.connect(functools.partial(self.merge_sessions, sesh.id))
+                self.table.setCellWidget(i, offset+0, button)
 
         self.table.blockSignals(False)
 
