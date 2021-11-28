@@ -39,14 +39,15 @@ def ms_str(ms, prec=3):
         return '-'
     if ms == INF:
         return 'DNF'
-    if ms > 60000:
-        [minutes, ms] = divmod(ms, 60000)
-        # Set up a format string since there's no .*f formatting
-        fmt = '%%d:%%0%s.%sf' % (prec + 3, prec)
-        return fmt % (minutes, ms / 1000)
+    [minutes, ms] = divmod(ms, 60000)
+    [seconds, ms] = divmod(ms, 1000)
+    if minutes:
+        pre = '%d:%02d' % (minutes, seconds)
+    else:
+        pre = '%d' % seconds
     # Set up a format string since there's no .*f formatting
-    fmt = '%%.%sf' % prec
-    return fmt % (ms / 1000)
+    fmt = '.%%0%sd' % prec
+    return pre + fmt % (ms // (10 ** (3 - prec)))
 
 # Qt helpers
 
