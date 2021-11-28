@@ -996,12 +996,12 @@ class SessionWidget(QWidget):
             self.average_viewer.update_solve(solve_id, n_solves)
             self.average_viewer.exec()
 
-    def show_graph(self):
+    def show_graph(self, stat):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
             if self.graph_viewer is None:
                 self.graph_viewer = analyze.GraphDialog(self)
-            self.graph_viewer.update_data({sesh.name: sesh.solves})
+            self.graph_viewer.update_data({sesh.name: sesh.solves}, stat=stat)
             self.graph_viewer.exec()
 
     def show_ctx_menu(self, pos):
@@ -1077,14 +1077,13 @@ class SessionWidget(QWidget):
                 self.update()
                 return
 
-            graph_button = QPushButton('Graph')
-            graph_button.pressed.connect(self.show_graph)
-
-            stat_table = [[graph_button, QLabel('current'), QLabel('best')]]
+            stat_table = [[None, QLabel('current'), QLabel('best'), None]]
 
             # Calculate statistics
 
             all_times = [solve_time(s) for s in solves]
+
+            graph_icon = QIcon('pix/graph.svg')
 
             stats_current = sesh.cached_stats_current or {}
             stats_best = sesh.cached_stats_best or {}
@@ -1121,10 +1120,16 @@ class SessionWidget(QWidget):
                     if not best or mean < best:
                         best = stats_best[label] = mean
 
-                stat_table.append([QLabel(label), QLabel(ms_str(mean)),
-                        QLabel(ms_str(best))])
+                # Ugh python scoping
+                bind = lambda stat: lambda: self.show_graph(stat)
 
-            make_grid(self.stats, stat_table)
+                graph_button = QPushButton(graph_icon, '')
+                graph_button.setStyleSheet('border: none;')
+                graph_button.pressed.connect(bind(label))
+                stat_table.append([QLabel(label), QLabel(ms_str(mean)),
+                        QLabel(ms_str(best)), graph_button])
+
+            make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
 
             sesh.cached_stats_current = stats_current
             sesh.cached_stats_best = stats_best
