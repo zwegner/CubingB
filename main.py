@@ -469,13 +469,6 @@ class CubeWindow(QMainWindow):
         self.gen_scramble()
         return final_time
 
-    # Start UI timer to update timer view. This needs to be called from a Qt thread,
-    # so it's scheduled separately when a bluetooth event comes in
-    def start_solve_ui(self):
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
-        self.timer.start(100)
-
     def stop_solve_ui(self, final_time):
         # Stop UI timer
         if self.timer:
