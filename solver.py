@@ -93,7 +93,7 @@ TURNS = []
 ROTATES = []
 def gen_turns():
     for F in range(6):
-        FR = []
+        FR = {}
         TURNS.append(FR)
         face = faces[F]
         for n in range(1, 4):
@@ -138,7 +138,7 @@ def {name}(e, c):
         ({c}))'''.format(name=name, i=', '.join(idxs), c=', '.join(cidxs))
             ctx = {}
             exec(code, ctx)
-            FR.append(ctx[name])
+            FR[4 - n] = ctx[name]
 
     def find_shift(l, i):
         ii = i
@@ -149,7 +149,7 @@ def {name}(e, c):
         assert 0, (l, ii)
 
     for [r, rotation] in enumerate(ROTATE_FACES):
-        FR = []
+        FR = {}
         ROTATES.append(FR)
         for n in range(1, 4):
             rot = list(range(6))
@@ -189,7 +189,7 @@ def {name}(cn, e, c):
         ({c}))'''.format(name=name, cn=', '.join(cnidxs), i=', '.join(idxs), c=', '.join(cidxs))
             ctx = {}
             exec(code, ctx)
-            FR.append(ctx[name])
+            FR[4 - n] = ctx[name]
 
 gen_turns()
 
@@ -202,10 +202,10 @@ def parse_move(move):
 def parse_rot(m):
     m = m.replace("2'", '2')
     if m.endswith("'"):
-        return 0
+        return 3
     elif m.endswith('2'):
-        return 1
-    return 2
+        return 2
+    return 1
 
 def parse_alg(alg):
     moves = []
@@ -221,7 +221,7 @@ def parse_alg(alg):
                 rot = face >> 1
                 rn = n
                 if face & 1:
-                    rn = 2 - n
+                    rn = 4 - n
                 face ^= 1
 
         elif move[0] in ROTATE_STR:
@@ -232,9 +232,9 @@ def parse_alg(alg):
             rot = SLICE_STR.index(move[0])
             rn = parse_rot(move)
             if SLICE_ROT_FLIP[rot]:
-                rn = 2 - rn
+                rn = 4 - rn
             face = rot * 2
-            n = 2 - rn
+            n = 4 - rn
             f2 = face + 1
             n2 = rn
         else:
