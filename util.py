@@ -15,9 +15,18 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
+import contextlib
+import time
+
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout)
 
 INF = float('+inf')
+
+@contextlib.contextmanager
+def time_execution(label):
+    start = time.time()
+    yield
+    print('%s: %.3fs' % (label, time.time() - start))
 
 def solve_time(solve):
     if solve.dnf:
