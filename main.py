@@ -47,8 +47,9 @@ from util import *
 
 WINDOW_SIZE = [1600, 1000]
 
+Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK', start=0)
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
-        'SMART_SCRAMBLED SMART_SOLVING SMART_VIEWING')
+        'SMART_SCRAMBLED SMART_SOLVING')
 
 SCRAMBLE_MOVES = 25
 
@@ -262,6 +263,8 @@ class CubeWindow(QMainWindow):
                 '   color: #FFF; background: rgb(80,80,255); padding: 5px; }'
                 '#top > * { padding-right: 100px; }')
 
+        # Set up default mode
+        self.set_mode(Mode.TIMER)
         self.gen_scramble()
 
         self.update_state_ui()
@@ -287,6 +290,9 @@ class CubeWindow(QMainWindow):
 
     def run_scheduled_fn_args(self, fn, args):
         fn(*args)
+
+    def set_mode(self, mode):
+        self.mode = mode
 
     def got_bt_connection(self, device):
         self.smart_device = device
@@ -365,26 +371,29 @@ class CubeWindow(QMainWindow):
 
         self.timer_widget.set_pending(False)
 
-        if self.state == State.SCRAMBLE:
-            self.scramble_widget.show()
-            self.scramble_view_widget.show()
-            self.timer_widget.show()
-        elif self.state == State.SOLVE_PENDING:
-            self.timer_widget.update_time(0, 3)
-            self.timer_widget.show()
-        elif self.state == State.SOLVING:
-            self.timer_widget.show()
-        elif self.state == State.SMART_SCRAMBLING:
-            self.scramble_widget.show()
-            self.gl_widget.show()
-        elif self.state == State.SMART_SCRAMBLED:
-            self.instruction_widget.setText("Start solving when you're ready!")
-            self.instruction_widget.show()
-            self.gl_widget.show()
-        elif self.state == State.SMART_SOLVING:
-            self.timer_widget.show()
-            self.start_solve_ui()
-        elif self.state == State.SMART_VIEWING:
+        # Timer mode: main scrambling/solving interface
+        if self.mode == Mode.TIMER:
+            if self.state == State.SCRAMBLE:
+                self.scramble_widget.show()
+                self.scramble_view_widget.show()
+                self.timer_widget.show()
+            elif self.state == State.SOLVE_PENDING:
+                self.timer_widget.update_time(0, 3)
+                self.timer_widget.show()
+            elif self.state == State.SOLVING:
+                self.timer_widget.show()
+            elif self.state == State.SMART_SCRAMBLING:
+                self.scramble_widget.show()
+                self.gl_widget.show()
+            elif self.state == State.SMART_SCRAMBLED:
+                self.instruction_widget.setText("Start solving when you're ready!")
+                self.instruction_widget.show()
+                self.gl_widget.show()
+            elif self.state == State.SMART_SOLVING:
+                self.timer_widget.show()
+                self.start_solve_ui()
+        # Playback mode
+        elif self.mode == Mode.PLAYBACK:
             self.smart_playback_widget.show()
             self.gl_widget.show()
 
@@ -512,7 +521,7 @@ class CubeWindow(QMainWindow):
     # data to a new object so it can pick up a consistent view at its leisure
     def mark_changed(self, playback=False):
         # Ignore smart cube events during a playback
-        if self.state == State.SMART_VIEWING and not playback:
+        if self.mode == Mode.PLAYBACK and not playback:
             return
 
         # XXX copy only the stuff that's modified in place. Don't introduce
@@ -677,12 +686,7 @@ class CubeWindow(QMainWindow):
         self.mark_changed(playback=True)
 
     def start_playback(self, solve_id, solve_nb):
-        # Save the state we're in so we can go back after playback. Make sure
-        # to not overwrite it if we're already in playback mode
-        if self.state != State.SMART_VIEWING:
-            self.prev_state = self.state
-
-        self.state = State.SMART_VIEWING
+        self.set_mode(Mode.PLAYBACK)
         with db.get_session() as session:
             solve = session.query_first(db.Solve, id=solve_id)
             self.reset(playback=True)
@@ -690,8 +694,7 @@ class CubeWindow(QMainWindow):
         self.update_state_ui()
 
     def stop_playback(self):
-        self.state = self.prev_state
-        self.prev_state = None
+        self.set_mode(Mode.TIMER)
         self.mark_changed()
         self.update_state_ui()
 
