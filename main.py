@@ -228,12 +228,23 @@ class CubeWindow(QMainWindow):
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         make_vbox(right, [top, self.gl_widget, timer_container])
 
-        settings_button = QPushButton('Settings')
-        settings_button.pressed.connect(self.settings_dialog.exec)
-        bt_button = QPushButton('Bluetooth')
-        bt_button.pressed.connect(self.bt_connection_dialog.exec)
+
+        settings_icon = QIcon('rsrc/material/settings_black_24dp.svg')
+        settings_button = QPushButton(settings_icon, '')
+        settings_button.clicked.connect(self.settings_dialog.exec)
+        bt_icon = QIcon('rsrc/material/bluetooth_black_24dp.svg')
+        bt_button = QPushButton(bt_icon, '')
+        bt_button.clicked.connect(self.bt_connection_dialog.exec)
 
         buttons = QWidget()
+        buttons.setStyleSheet('QPushButton { icon-size: 40px 40px; '
+                'border: 1px solid #777; border-radius: 5px; '
+                'border-style: outset; padding: 5px; '
+                'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
+                '   stop: 0 #fff, stop: 1 #eee); } '
+                'QPushButton::pressed { '
+                'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
+                '   stop: 0 #ccc, stop: 1 #aaa); } ')
         make_vbox(buttons, [settings_button, bt_button])
 
         # Make grid and overlapping status widget and buttons
