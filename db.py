@@ -99,6 +99,21 @@ class Solve(Base, NiceBase):
 
 Index('solve_session_idx', Solve.session_id, Solve.created_at)
 
+class Algorithm(Base, NiceBase):
+    __tablename__ = 'algorithms'
+    alg_set = Column(String(32))
+    alg_nb = Column(String(32))
+    moves = Column(String(256))
+    notes = Column(Text)
+
+class AlgExecution(Base, NiceBase):
+    __tablename__ = 'alg_execs'
+    alg_id = Column(Integer, ForeignKey(Algorithm.id))
+    alg = relationship('Algorithm')
+    time_ms = Column(Integer)
+    # Ehh that's probably not worth the space
+    #smart_data_raw = Column(BLOB)
+
 class Settings(Base, NiceBase):
     __tablename__ = 'settings'
     current_session_id = Column(Integer, ForeignKey(Session.id))

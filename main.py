@@ -47,7 +47,7 @@ from util import *
 
 WINDOW_SIZE = [1600, 1000]
 
-Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK', start=0)
+Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK ALG_TRAINING', start=0)
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
         'SMART_SCRAMBLED SMART_SOLVING')
 
@@ -201,6 +201,7 @@ class CubeWindow(QMainWindow):
         self.scramble_view_widget = ScrambleViewWidget(self)
         self.instruction_widget = InstructionWidget(self)
         self.timer_widget = TimerWidget(self)
+        self.alg_trainer_widget = analyze.AlgTrainer(self)
         self.session_widget = SessionWidget(self)
         self.smart_playback_widget = SmartPlaybackWidget(self)
         self.bt_status_widget = BluetoothStatusWidget(self)
@@ -391,6 +392,7 @@ class CubeWindow(QMainWindow):
         self.scramble_view_widget.hide()
         self.instruction_widget.hide()
         self.timer_widget.hide()
+        self.alg_trainer_widget.hide()
 
         self.timer_widget.set_pending(False)
 
@@ -419,6 +421,9 @@ class CubeWindow(QMainWindow):
         elif self.mode == Mode.PLAYBACK:
             self.smart_playback_widget.show()
             self.gl_widget.show()
+        # Alg Training mode
+        elif self.mode == Mode.ALG_TRAINING:
+            self.alg_trainer_widget.show()
 
     def start_pending(self):
         self.pending_start = time.time()
@@ -567,6 +572,14 @@ class CubeWindow(QMainWindow):
         alg = solver.move_str(face, turn)
         self.cube.run_alg(alg)
         old_state = self.state
+
+        # Alg training mode: just let the trainer handle all the logic
+        if self.mode == Mode.ALG_TRAINING:
+            self.alg_trainer_widget.make_move(face, turn)
+            return
+
+        assert self.mode == Mode.TIMER
+
         # Scrambling: see if this is the next move of the scramble
         if self.state == State.SMART_SCRAMBLING:
             # If this is the first move of the scramble, check if

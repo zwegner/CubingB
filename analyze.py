@@ -17,12 +17,17 @@
 
 import collections
 import gzip
+import itertools
 import math
+import re
 import struct
+import time
 
 from PyQt5.QtCore import (QSize, Qt)
-from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox)
+from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox,
+        QWidget, QSizePolicy)
 
+import db
 import solver
 from util import *
 
@@ -319,7 +324,177 @@ class SmartSolve:
         c.run_alg(' '.join(self.reconstruction))
         self.solved = (c == solver.SOLVED_CUBE)
 
-# UI Widgets
+# Alg training stuff
+
+N_RECENT_ALGS = 10
+
+class AlgTrainer(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.recent_algs = []
+
+        title = QLabel('Alg Trainer')
+        title.setStyleSheet('font: 24px;')
+        self.current = QLabel()
+        self.current.setWordWrap(True)
+
+        recents = QWidget(self)
+        recents.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.recent = [[QLabel(), QLabel()] for y in range(N_RECENT_ALGS)]
+        make_grid(recents, self.recent)
+
+        make_vbox(self, [title, self.current, recents])
+
+        self.reset()
+
+        self.build_regex()
+
+    # Build a regex of all the algs in the db. I had started to build a trie to
+    # match the current moves to a list of known algorithms, and seeing the
+    # complications of that approach when dealing with the needs of the trainer
+    # feature (like recognizing slice moves as simultaneous U/D etc moves, or
+    # ignoring an incorrect turn that is reversed (like U U') in the middle of
+    # an alg, or matching algs that have another alg as a substring, etc.),
+    # it became clear just using a regex combined with some preprocessing would
+    # be simpler and probably faster
+    def build_regex(self):
+        regs = []
+        with db.get_session() as session:
+            for alg in session.query_all(db.Algorithm):
+                moves = []
+                # Parse the alg to remove rotations
+                cube = solver.Cube()
+                for move in alg.moves.split():
+                    [m] = solver.parse_alg(move)
+                    [_, _, f1, t1, f2, t2] = m
+                    if f1 is not None:
+                        moves.append((cube.centers[f1], t1))
+                        if f2 is not None:
+                            moves.append((cube.centers[f2], t2))
+                    cube.run_alg(move)
+
+                regex_parts = []
+                while moves:
+                    [f1, t1] = moves.pop(0)
+                    # Pop off another move if it's on the opposite face. This
+                    # happens with slice moves, but also algs like G perms with
+                    # simultaneous U/D moves.
+                    if moves and moves[0][0] == f1 ^ 1:
+                        [f2, t2] = moves.pop(0)
+
+                        # Split double moves into component parts: two consecutive
+                        # turns in either direction
+                        turns_1 = []
+                        if t1 == 2:
+                            turns_1.append([1, 1])
+                            turns_1.append([-1, -1])
+                        else:
+                            turns_1.append([t1])
+
+                        turns_2 = []
+                        if t2 == 2:
+                            turns_2.append([1, 1])
+                            turns_2.append([-1, -1])
+                        else:
+                            turns_2.append([t2])
+
+                        # Now for all combinations of the component parts of both
+                        # turns, create all sequences composed of the components
+                        # interleaved together
+                        alt_parts = []
+                        for [pt1, pt2] in itertools.product(turns_1, turns_2):
+                            # Generate all interleaved orderings. If all the
+                            # components together have length n, and m of those
+                            # are components of the first move, then there are
+                            # n choose m orderings. We take range(n) as all the
+                            # indices of the final list and take all possible ways
+                            # of choosing m of them to come from the first move.
+                            n = len(pt1) + len(pt2)
+                            for i1 in itertools.combinations(range(n), len(pt1)):
+                                # Copy the components so we can pop them
+                                p1 = pt1[:]
+                                p2 = pt2[:]
+                                part = []
+                                for i in range(n):
+                                    if i in i1:
+                                        part.append((f1, p1.pop(0)))
+                                    else:
+                                        part.append((f2, p2.pop(0)))
+                                assert p1 == [] and p2 == []
+                                # And more annoying^Wfun complications! Merge
+                                # consecutive turns of the same type, so
+                                # R L' L' R becomes R L2 R. Go backwards so we
+                                # can modify in place.
+                                for i in range(n - 2, -1, -1):
+                                    if part[i][0] == part[i+1][0]:
+                                        part[i:i+2] = [(part[i][0],
+                                                (part[i][1] + part[i+1][1]) % 4)]
+
+                                alt_parts.append(' '.join(solver.move_str(f, t)
+                                        for [f, t] in part))
+
+                        regex_parts.append('(%s)' % '|'.join(alt_parts))
+                    else:
+                        regex_parts.append(solver.move_str(f1, t1))
+
+                regs.append('(?P<g%s>%s)' % (alg.id, ' '.join(regex_parts)))
+
+        self.matcher = re.compile('|'.join(regs))
+
+    def reset(self):
+        self.current_moves = []
+        self.move_times = []
+        self.last_face = None
+        self.last_turn = None
+        self.render()
+
+    def render(self):
+        self.current.setText(' '.join(self.current_moves))
+        for [l, [t, a]] in zip(self.recent, self.recent_algs):
+            l[0].setText(ms_str(t * 1000))
+            l[1].setText(a)
+
+        self.update()
+
+    def make_move(self, face, turn):
+        # Update current list of moves, collapsing double turns, etc.
+        if face == self.last_face:
+            self.last_turn = (self.last_turn + turn) % 4
+            # Last move was reversed: pop it off the move list
+            if not self.last_turn:
+                self.current_moves.pop(-1)
+                self.move_times.pop(-1)
+                self.last_face = None
+                if self.current_moves:
+                    m = self.current_moves[-1]
+                    [self.last_face, self.last_turn] = solver.parse_move(m)
+            # Otherwise, merge the moves
+            else:
+                self.current_moves[-1] = solver.move_str(face, self.last_turn)
+        else:
+            self.last_face = face
+            self.last_turn = turn
+            self.current_moves.append(solver.move_str(face, turn))
+            self.move_times.append(time.time())
+
+        move_str = ' '.join(self.current_moves)
+        match = self.matcher.search(move_str)
+        done = False
+        if match:
+            alg_id = match.lastgroup
+            moves = match.group(alg_id).split()
+            with db.get_session() as session:
+                alg = session.query_first(db.Algorithm, id=int(alg_id[1:]))
+                assert len(self.move_times) == len(self.current_moves)
+                start = self.move_times[-len(moves)]
+                t = time.time() - start
+                a = '%s - %s' % (alg.alg_set, alg.alg_nb)
+                self.recent_algs.insert(0, (t, a))
+                self.recent_algs = self.recent_algs[:N_RECENT_ALGS]
+
+            self.reset()
+
+        self.render()
 
 GRAPH_TYPES = ['adaptive', 'date', 'count']
 
