@@ -63,8 +63,10 @@ def make_vbox(parent, children):
         layout.addWidget(c)
     return layout
 
-def make_grid(parent, table, stretch=None, widths=None):
+def make_grid(parent, table, stretch=None, widths=None, margin=None):
     layout = QGridLayout(parent)
+    if margin is not None:
+        layout.setContentsMargins(margin, margin, margin, margin)
     width = max(len(row) for row in table)
     for [i, row] in enumerate(table):
         # Not enough items in the row: assume one cell spanning the whole width

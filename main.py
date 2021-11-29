@@ -221,15 +221,15 @@ class CubeWindow(QMainWindow):
         bt_button.clicked.connect(self.bt_connection_dialog.exec)
 
         buttons = QWidget()
-        buttons.setStyleSheet('QPushButton { icon-size: 28px 28px; '
-                'border: 1px solid #777; border-radius: 5px; '
-                'border-style: outset; padding: 5px; '
+        buttons.setStyleSheet('QPushButton { icon-size: 20px 20px; max-width: 30px; '
+                'border: 1px solid #777; border-radius: 3px; '
+                'border-style: outset; padding: 5px; margin: 0px; '
                 'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
                 '   stop: 0 #fff, stop: 1 #eee); } '
                 'QPushButton::pressed { '
                 'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
                 '   stop: 0 #ccc, stop: 1 #aaa); } ')
-        make_hbox(buttons, [settings_button, bt_button])
+        make_grid(buttons, [[settings_button], [bt_button]], margin=0)
 
         # Make main layout
         main = QWidget()
@@ -242,14 +242,15 @@ class CubeWindow(QMainWindow):
         self.tab_bar.currentChanged.connect(self.change_tab)
 
         title = QLabel('CubingB')
-        title.setStyleSheet('font: 36px')
+        title.setStyleSheet('font: 48px; padding: 8px;')
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left = QWidget()
         make_grid(left, [
             [self.tab_bar], 
             [title, buttons],
             [self.session_widget]
         ])
-        left.setStyleSheet('SessionWidget, QTabBar { max-width: 300px; }')
+        left.setStyleSheet('SessionWidget, QTabBar { max-width: 350px; }')
 
         top = QWidget()
         top.setObjectName('top')
@@ -991,6 +992,7 @@ class SessionWidget(QWidget):
         self.setStyleSheet('SessionWidget { max-width: 350px; }')
 
         self.label = QLabel('Session:')
+        self.label.setStyleSheet('font: 18px; font-weight: bold;')
         self.selector = QComboBox()
         self.selector.currentIndexChanged.connect(self.change_session)
 
@@ -1442,7 +1444,7 @@ class SessionEditorDialog(QDialog):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
 
         self.table.itemChanged.connect(self.edit_attr)
 
@@ -1499,7 +1501,7 @@ class SessionEditorDialog(QDialog):
         self.accept()
 
     def sizeHint(self):
-        return QSize(700, 800)
+        return QSize(1000, 800)
 
     def merge_sessions(self, session_id):
         with db.get_session() as session:
@@ -1556,6 +1558,8 @@ class SessionEditorDialog(QDialog):
                 self.table.setCellWidget(i, offset+0, button)
 
         self.table.blockSignals(False)
+
+        self.table.resizeColumnsToContents()
 
 class SmartPlaybackWidget(QWidget):
     def __init__(self, parent):
