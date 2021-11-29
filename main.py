@@ -719,7 +719,7 @@ class SettingsDialog(QDialog):
             sliders.append([QLabel('Rotation %s:' % axis.upper()), slider])
 
         reset_button = QPushButton('Reset Camera')
-        reset_button.pressed.connect(self.parent.gl_widget.reset_camera)
+        reset_button.clicked.connect(self.parent.gl_widget.reset_camera)
 
         # Initialize persistent settings
         with db.get_session() as session:
@@ -753,12 +753,12 @@ class BluetoothConnectionDialog(QDialog):
         self.bt_handler = bt_handler
 
         scan = QPushButton('Scan')
-        scan.pressed.connect(self.start_scan)
+        scan.clicked.connect(self.start_scan)
 
         self.status = QLabel()
         self.disconnect = QPushButton('Disconnect')
         self.disconnect.hide()
-        self.disconnect.pressed.connect(self.disconnect_device)
+        self.disconnect.clicked.connect(self.disconnect_device)
 
         self.table = QTableWidget()
         self.table.setColumnCount(2)
@@ -1130,7 +1130,7 @@ class SessionWidget(QWidget):
 
                 graph_button = QPushButton(graph_icon, '')
                 graph_button.setStyleSheet('border: none;')
-                graph_button.pressed.connect(functools.partial(self.show_graph, stat))
+                graph_button.clicked.connect(functools.partial(self.show_graph, stat))
                 stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
                         QLabel(ms_str(best)), graph_button])
 
@@ -1181,9 +1181,9 @@ class SolveEditorDialog(QDialog):
         self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', bool(v)))
 
         delete = QPushButton('Delete')
-        delete.pressed.connect(self.delete_solve)
+        delete.clicked.connect(self.delete_solve)
         merge = QPushButton('Move to session...')
-        merge.pressed.connect(self.move_solve)
+        merge.clicked.connect(self.move_solve)
 
         self.layout = make_grid(self, [
             [QLabel('Session:'), self.session_label],
@@ -1242,7 +1242,7 @@ class SolveEditorDialog(QDialog):
             if solve.smart_data_raw:
                 solve_nb = get_solve_nb(session, solve)
                 self.smart_widget = QPushButton('View Playback')
-                self.smart_widget.pressed.connect(
+                self.smart_widget.clicked.connect(
                         lambda: self.start_playback(solve_id, solve_nb))
             else:
                 self.smart_widget = QLabel('None')
@@ -1518,7 +1518,7 @@ class SessionEditorDialog(QDialog):
                             cell(ms_str(stats.get(stat))))
                 offset = 3 + len(STAT_AO_COUNTS)
                 button = QPushButton('Merge...')
-                button.pressed.connect(functools.partial(self.merge_sessions, sesh.id))
+                button.clicked.connect(functools.partial(self.merge_sessions, sesh.id))
                 self.table.setCellWidget(i, offset+0, button)
 
         self.table.blockSignals(False)
@@ -1535,8 +1535,8 @@ class SmartPlaybackWidget(QWidget):
         self.stop_button = QPushButton('Exit')
         self.current_time_label = QLabel()
         self.end_time_label = QLabel()
-        self.play_button.pressed.connect(self.play_pause)
-        self.stop_button.pressed.connect(self.stop_playback)
+        self.play_button.clicked.connect(self.play_pause)
+        self.stop_button.clicked.connect(self.stop_playback)
 
         slider = QSlider()
         slider.setOrientation(Qt.Horizontal)
