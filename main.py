@@ -1528,15 +1528,37 @@ class SmartPlaybackWidget(QWidget):
         super().__init__(parent)
         self.parent = parent
 
+        # Set up play/pause/etc. controls. We hang on to the play/pause icons and
+        # button (in the self object) since that changes dynamically
+        self.play_icon = QIcon('rsrc/material/play_arrow_black_24dp.svg')
+        self.pause_icon = QIcon('rsrc/material/pause_black_24dp.svg')
+        self.play_button = QPushButton(self.play_icon, '')
+        self.play_button.clicked.connect(self.play_pause)
+
+        start_icon = QIcon('rsrc/material/skip_previous_black_24dp.svg')
+        start_button = QPushButton(start_icon, '')
+        start_button.clicked.connect(lambda: self.scrub(0))
+        end_icon = QIcon('rsrc/material/skip_next_black_24dp.svg')
+        end_button = QPushButton(end_icon, '')
+        end_button.clicked.connect(lambda: self.scrub(len(self.events) - 1))
+        exit_button = QPushButton('Exit')
+        exit_button.clicked.connect(self.stop_playback)
+
+        controls = QWidget()
+        controls.setStyleSheet('QPushButton { icon-size: 40px 40px; '
+                'border: none; }')
+        make_grid(controls, [[None, start_button, self.play_button, end_button, None,
+                exit_button]], stretch=[1, 0, 0, 0, 1, 0])
+
         self.title = QLabel()
         self.title.setStyleSheet('QLabel { font: 24px; }')
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.play_button = QPushButton('Play')
-        self.stop_button = QPushButton('Exit')
+
+        time_labels = QWidget()
+        time_labels.setStyleSheet('QLabel { font: 14px Courier; } ')
         self.current_time_label = QLabel()
         self.end_time_label = QLabel()
-        self.play_button.clicked.connect(self.play_pause)
-        self.stop_button.clicked.connect(self.stop_playback)
+        make_hbox(time_labels, [self.current_time_label, self.end_time_label])
 
         slider = QSlider()
         slider.setOrientation(Qt.Horizontal)
@@ -1544,13 +1566,10 @@ class SmartPlaybackWidget(QWidget):
         self.slider = slider
 
         grid = make_grid(self, [
-            [None] * 6, # Placeholder for title
-            [None, self.current_time_label, self.end_time_label, self.play_button,
-                None, self.stop_button],
-            [slider]
-        ], stretch=[1, 0, 0, 0, 1, 0], widths=[0, 60, 60, 80, 0, 80])
-        # Title takes up the middle three non-stretchy columns
-        grid.addWidget(self.title, 0, 1, 1, 3)
+            [self.title],
+            [controls],
+            [time_labels, slider]
+        ])
 
         self.timer = QTimer()
         self.timer.setSingleShot(True)
@@ -1565,7 +1584,7 @@ class SmartPlaybackWidget(QWidget):
     def set_playing(self, playing):
         self.playing = playing
         if playing:
-            self.play_button.setText('Pause')
+            self.play_button.setIcon(self.pause_icon)
             # Get current time and first timestamp so we can keep in sync
             self.base_time = time.time()
             if self.event_idx >= len(self.events):
@@ -1573,7 +1592,7 @@ class SmartPlaybackWidget(QWidget):
             self.base_ts = self.events[self.event_idx].ts
             self.play_event()
         else:
-            self.play_button.setText('Play')
+            self.play_button.setIcon(self.play_icon)
             self.timer.stop()
             self.base_ts = 0
 
@@ -1617,6 +1636,11 @@ class SmartPlaybackWidget(QWidget):
         self.parent.schedule_fn.emit(self.parent.stop_playback)
 
     def scrub(self, event_idx):
+        # In case this came from start/end buttons, set the slider to new position
+        self.slider.blockSignals(True)
+        self.slider.setValue(event_idx)
+        self.slider.blockSignals(False)
+
         # Search for the last cube state before this event ("keyframe"), then
         # play forward from there til the index
         i = event_idx
@@ -1642,8 +1666,12 @@ class SmartPlaybackWidget(QWidget):
         self.events = solve.events
         self.title.setText('Solve %s (%s)' % (solve.solve_nb, solve.session_name))
 
+        self.slider.blockSignals(True)
+        self.slider.setValue(0)
+        self.slider.blockSignals(False)
         self.slider.setMaximum(len(self.events) - 1)
 
+        self.current_time_label.setText(ms_str(0))
         # Meh, sometimes the last event has a zero timestamp
         end_ts = max(self.events[-1].ts, self.events[-2].ts)
         self.end_time_label.setText('/ %s' % ms_str(end_ts))
