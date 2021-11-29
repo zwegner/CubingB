@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QOpenGLWidget,
         QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
         QComboBox, QDialog, QDialogButtonBox, QAbstractItemView, QHeaderView,
         QFrame, QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog,
-        QMenu, QAction, QPlainTextEdit)
+        QMenu, QAction, QPlainTextEdit, QTabBar)
 from PyQt5.QtGui import QIcon, QFont, QFontDatabase
 
 import analyze
@@ -211,25 +211,7 @@ class CubeWindow(QMainWindow):
         self.bt_connection_dialog = BluetoothConnectionDialog(self, self.bt_handler)
         self.settings_dialog = SettingsDialog(self)
 
-        main = QWidget()
-
-        # Create an overlapping widget thingy so the scramble is above the timer
-        timer_container = QWidget(main)
-        timer_layout = QGridLayout(timer_container)
-        timer_layout.addWidget(self.timer_widget, 0, 0)
-        timer_layout.addWidget(self.scramble_view_widget, 0, 0,
-                Qt.AlignRight | Qt.AlignTop)
-
-        top = QWidget()
-        top.setObjectName('top')
-        make_hbox(top, [self.instruction_widget, self.smart_playback_widget,
-                self.scramble_widget])
-
-        right = QWidget()
-        right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        make_vbox(right, [top, self.gl_widget, timer_container])
-
-
+        # Set up settings buttons
         settings_icon = QIcon('rsrc/material/settings_black_24dp.svg')
         settings_button = QPushButton(settings_icon, '')
         settings_button.clicked.connect(self.settings_dialog.exec)
@@ -238,7 +220,7 @@ class CubeWindow(QMainWindow):
         bt_button.clicked.connect(self.bt_connection_dialog.exec)
 
         buttons = QWidget()
-        buttons.setStyleSheet('QPushButton { icon-size: 40px 40px; '
+        buttons.setStyleSheet('QPushButton { icon-size: 28px 28px; '
                 'border: 1px solid #777; border-radius: 5px; '
                 'border-style: outset; padding: 5px; '
                 'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
@@ -246,13 +228,49 @@ class CubeWindow(QMainWindow):
                 'QPushButton::pressed { '
                 'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
                 '   stop: 0 #ccc, stop: 1 #aaa); } ')
-        make_vbox(buttons, [settings_button, bt_button])
+        make_hbox(buttons, [settings_button, bt_button])
 
-        # Make grid and overlapping status widget and buttons
-        grid = make_grid(main, [[self.session_widget, right]])
+        # Make main layout
+        main = QWidget()
+
+        # Set up left
+        self.tab_bar = QTabBar()
+        self.tab_bar.addTab('Timer')
+        self.tab_bar.addTab('Playback')
+        self.tab_bar.addTab('Trainer')
+        self.tab_bar.currentChanged.connect(self.change_tab)
+
+        title = QLabel('CubingB')
+        title.setStyleSheet('font: 36px')
+        left = QWidget()
+        make_grid(left, [
+            [self.tab_bar], 
+            [title, buttons],
+            [self.session_widget]
+        ])
+        left.setStyleSheet('SessionWidget, QTabBar { max-width: 300px; }')
+
+        top = QWidget()
+        top.setObjectName('top')
+        make_hbox(top, [self.instruction_widget, self.smart_playback_widget,
+                self.scramble_widget])
+
+        # Create an overlapping widget thingy so the scramble is above the timer
+        timer_container = QWidget(main)
+        timer_layout = QGridLayout(timer_container)
+        timer_layout.addWidget(self.timer_widget, 0, 0)
+        timer_layout.addWidget(self.scramble_view_widget, 0, 0,
+                Qt.AlignRight | Qt.AlignTop)
+
+        right = QWidget()
+        right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        make_vbox(right, [top, self.gl_widget, timer_container,
+                self.alg_trainer_widget])
+
+        # Make grid and overlapping status widget
+        grid = make_grid(main, [[left, right]])
         grid.addWidget(self.bt_status_widget, 0, 1,
                 Qt.AlignRight | Qt.AlignBottom)
-        grid.addWidget(buttons, 0, 1, Qt.AlignRight | Qt.AlignTop)
 
         self.setCentralWidget(main)
 
@@ -293,6 +311,11 @@ class CubeWindow(QMainWindow):
 
     def set_mode(self, mode):
         self.mode = mode
+        self.tab_bar.setCurrentIndex(int(mode))
+
+    def change_tab(self, tab):
+        self.mode = Mode(tab)
+        self.update_state_ui()
 
     def got_bt_connection(self, device):
         self.smart_device = device
@@ -691,11 +714,6 @@ class CubeWindow(QMainWindow):
             solve = session.query_first(db.Solve, id=solve_id)
             self.reset(playback=True)
             self.smart_playback_widget.update_solve(analyze.SmartSolve(solve, solve_nb))
-        self.update_state_ui()
-
-    def stop_playback(self):
-        self.set_mode(Mode.TIMER)
-        self.mark_changed()
         self.update_state_ui()
 
 class SettingsDialog(QDialog):
@@ -1544,14 +1562,12 @@ class SmartPlaybackWidget(QWidget):
         end_icon = QIcon('rsrc/material/skip_next_black_24dp.svg')
         end_button = QPushButton(end_icon, '')
         end_button.clicked.connect(lambda: self.scrub(len(self.events) - 1))
-        exit_button = QPushButton('Exit')
-        exit_button.clicked.connect(self.stop_playback)
 
         controls = QWidget()
         controls.setStyleSheet('QPushButton { icon-size: 40px 40px; '
                 'border: none; }')
         make_grid(controls, [[None, start_button, self.play_button, end_button, None,
-                exit_button]], stretch=[1, 0, 0, 0, 1, 0])
+                ]], stretch=[1, 0, 0, 0, 1])
 
         self.title = QLabel()
         self.title.setStyleSheet('QLabel { font: 24px; }')
@@ -1634,9 +1650,6 @@ class SmartPlaybackWidget(QWidget):
                 diff_time = (time.time() - self.base_time) * 1000
                 next_time = diff_ts - diff_time
                 self.timer.start(max(0, int(next_time)))
-
-    def stop_playback(self):
-        self.parent.schedule_fn.emit(self.parent.stop_playback)
 
     def scrub(self, event_idx):
         # In case this came from start/end buttons, set the slider to new position
