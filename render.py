@@ -24,9 +24,9 @@ import solver
 COLORS = [
     [1, 1, 1],
     [1, 1, 0],
-    [1, 0, 0],
-    [1, .4, 0],
-    [0, 1, 0],
+    [.85, 0, 0],
+    [1, .6, .1],
+    [0, .7, 0],
     [0, 0, 1],
     [.1, .1, .1],
 ]
@@ -36,9 +36,9 @@ BG_COLOR = [.7, .7, .7, 1]
 # How much spacing is between cubies? This is a factor--1.03 == 3% of piece size
 GAP = 1.03
 
-EDGES = [None] * 12
-CORNERS = [None] * 8
-CENTERS = [None] * 6
+EDGE_QUADS = [None] * 12
+CORNER_QUADS = [None] * 8
+CENTER_QUADS = [None] * 6
 
 # Copy of solver.CENTERS but in a much listier format
 DUMB_CENTERS = [[0], [1], [2], [3], [4], [5]]
@@ -53,7 +53,15 @@ AXES = [
     [0, 0, 1],
 ]
 
-FONT = None
+# Translation table: these are the XYZ coordinates of each
+# edge/corner/center in the solver.py order
+EDGES = [(1, 0, 2), (2, 0, 1), (1, 0, 0), (0, 0, 1),
+    (2, 1, 2), (2, 1, 0), (0, 1, 0), (0, 1, 2),
+    (1, 2, 2), (2, 2, 1), (1, 2, 0), (0, 2, 1)]
+CORNERS = [(2, 0, 2), (2, 0, 0), (0, 0, 0), (0, 0, 2),
+    (2, 2, 0), (2, 2, 2), (0, 2, 2), (0, 2, 0)]
+CENTERS = [(1, 0, 1), (1, 2, 1), (2, 1, 1), (0, 1, 1),
+    (1, 1, 2), (1, 1, 0)]
 
 def gen_verts():
     # Vertex tables for a single cubie
@@ -77,16 +85,6 @@ def gen_verts():
         [1, 0, 4, 5],
     ]
 
-    # Translation table: these are the XYZ coordinates of each
-    # edge/corner/center in the solver.py order
-    edges = [[1, 0, 2], [2, 0, 1], [1, 0, 0], [0, 0, 1],
-        [2, 1, 2], [2, 1, 0], [0, 1, 0], [0, 1, 2],
-        [1, 2, 2], [2, 2, 1], [1, 2, 0], [0, 2, 1]]
-    corners = [[2, 0, 2], [2, 0, 0], [0, 0, 0], [0, 0, 2],
-        [2, 2, 0], [2, 2, 2], [0, 2, 2], [0, 2, 0]]
-    centers = [[1, 0, 1], [1, 2, 1], [2, 1, 1], [0, 1, 1],
-        [1, 1, 2], [1, 1, 0]]
-
     for x in range(3):
         for y in range(3):
             for z in range(3):
@@ -96,10 +94,10 @@ def gen_verts():
                     vert = [vx + GAP * x, 3 - (vy + GAP * y), vz + GAP * z]
                     verts.append([(c - 1.5) / 3 for c in vert])
 
-                coord = [x, y, z]
-                for [table, lookup, result] in [[edges, solver.EDGES, EDGES],
-                        [corners, solver.CORNERS, CORNERS],
-                        [centers, DUMB_CENTERS, CENTERS]]:
+                coord = (x, y, z)
+                for [table, lookup, result] in [[EDGES, solver.EDGES, EDGE_QUADS],
+                        [CORNERS, solver.CORNERS, CORNER_QUADS],
+                        [CENTERS, DUMB_CENTERS, CENTER_QUADS]]:
                     # Look up this cubie in the translation table, and use
                     # that to place the vertices in the proper list, with
                     # the faces matching up to the same color ordering as
@@ -137,22 +135,6 @@ def set_persective(window_size, zoom):
     # Switch back to the model matrix stack for rendering
     glMatrixMode(GL_MODELVIEW)
 
-def set_ortho(window_size, ax, ay):
-    # Set up view
-    [w, h] = window_size
-    glMatrixMode(GL_PROJECTION)
-    glLoadIdentity()
-    glViewport(0, 0, w, h)
-    glOrtho(-1, 1, -1, 1, -1, 1)
-
-    # Switch back to the model matrix stack for rendering
-    glMatrixMode(GL_MODELVIEW)
-
-    glLoadIdentity()
-
-    glRotatef(ax, 1, 0, 0)
-    glRotatef(ay, 0, -1, 0)
-
 def reset():
     glClearColor(*BG_COLOR)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -171,9 +153,9 @@ def render_cube(cube, turns):
     dumb_centers = [[c] for c in cube.centers]
 
     # Render edges/corners/centers
-    for [cubie_set, quad_set, face_set] in [[cube.edges, EDGES, solver.EDGES],
-            [cube.corners, CORNERS, solver.CORNERS],
-            [dumb_centers, CENTERS, DUMB_CENTERS]]:
+    for [cubie_set, quad_set, face_set] in [[cube.edges, EDGE_QUADS, solver.EDGES],
+            [cube.corners, CORNER_QUADS, solver.CORNERS],
+            [dumb_centers, CENTER_QUADS, DUMB_CENTERS]]:
         for [cubie, quads, faces] in zip(cubie_set, quad_set, face_set):
             # See if the face this cubie is on is in a partial rotation
             glPushMatrix()
@@ -204,4 +186,100 @@ def render_cube(cube, turns):
 
             glPopMatrix()
 
+# SVG diagram generation stuff. Not OpenGL like the rest of this
+# file, but main.py is bloated so just chuck it in here I guess.
+
+SVG_COLORS = [
+    '#fff',
+    '#ff0',
+    '#d00',
+    '#f92',
+    '#0b0',
+    '#00f',
+]
+
+r3 = 3 ** .5
+DXS = [
+    [r3, 1],
+    [r3, 1],
+    [r3, -1],
+]
+DYS = [
+    [-r3, 1],
+    [0, 2],
+    [0, 2],
+]
+BASE = [
+    [0, -6],
+    [-3 * r3, -3],
+    [0, 0],
+]
+
+EDGE_COORDS = {}
+CORNER_COORDS = {}
+CENTER_COORDS = {}
+
+def gen_svg_tables():
+    face_coords = [
+        [solver.W, 0, lambda i, j: (i, 0, j)],
+        [solver.G, 1, lambda i, j: (i, j, 2)],
+        [solver.R, 2, lambda i, j: (2, j, 2-i)],
+    ]
+
+    for [color, direction, coord_xform] in face_coords:
+        for x in range(3):
+            for y in range(3):
+                coord = coord_xform(x, y)
+
+                for [table, lookup, result] in [[EDGES, solver.EDGES, EDGE_COORDS],
+                        [CORNERS, solver.CORNERS, CORNER_COORDS],
+                        [CENTERS, DUMB_CENTERS, CENTER_COORDS]]:
+                    if coord in table:
+                        index = table.index(coord)
+                        for [i, c] in enumerate(lookup[index]):
+                            if c == color:
+                                dx = DXS[direction]
+                                dy = DYS[direction]
+                                b = BASE[direction]
+                                sx = x * dx[0] + y * dy[0] + b[0]
+                                sy = y * dy[1] + x * dx[1] + b[1]
+
+                                path = (f'M {sx} {sy} l {dx[0]} {dx[1]} '
+                                        f'l {dy[0]} {dy[1]} l {-dx[0]} {-dx[1]} z')
+
+                                result[(index, i)] = path
+
+def gen_cube_diagram(cube, transform=''):
+    # Render cube
+    dumb_centers = [[c] for c in cube.centers]
+
+    # Render edges/corners/centers
+    cubies = []
+    for [cubie_set, paths] in [[cube.edges, EDGE_COORDS],
+            [cube.corners, CORNER_COORDS], [dumb_centers, CENTER_COORDS]]:
+        for [i, cubie] in enumerate(cubie_set):
+            for [j, c] in enumerate(cubie):
+                index = (i, j)
+                if index in paths:
+                    cubies.append(f'''<path d="{paths[index]}"
+                        fill="{SVG_COLORS[c]}" stroke="black" stroke-width=".15" />''') 
+
+    f = 1.015
+    d = [3*r3 * f, 3 * f]
+    dy = 6*f
+    sx = 0
+    sy = -6*f
+    return f'''<svg viewBox='-6.1 -6.1 12.2 12.2' fill='transparent'>
+            <clipPath id='clip'>
+            <path d="M 0 {sy} l {d[0]} {d[1]} l 0 {dy}
+                  l {-d[0]} {d[1]} l {-d[0]} {-d[1]} l 0 {-dy} z"/>
+            </clipPath>
+            <g clip-path='url(#clip)' transform="{transform}">
+              {' '.join(cubies)}
+            </g>
+        </svg>'''
+
+# Generate static tables
+
 gen_verts()
+gen_svg_tables()

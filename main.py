@@ -34,6 +34,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QOpenGLWidget,
         QFrame, QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog,
         QMenu, QAction, QPlainTextEdit, QTabBar)
 from PyQt5.QtGui import QIcon, QFont, QFontDatabase
+from PyQt5.QtSvg import QSvgWidget
 
 import analyze
 import bluetooth
@@ -943,48 +944,36 @@ class ScrambleWidget(QLabel):
         self.update()
 
 class ScrambleViewWidget(QFrame):
-    def __init__(self, parent):
+    def __init__(self, parent, size=200):
         super().__init__(parent)
-        self.scramble = None
-        self.last_scramble = None
-
-        # Set up a GL widget to render little scrambled cubes
-        self.gl_widget = GLWidget(self)
-        self.gl_widget.resize(200, 200)
-        self.gl_widget.hide()
 
         # Build layout for scramble view
         label = QLabel('Scramble')
         label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.top_pic = QLabel()
-        self.bottom_pic = QLabel()
+        self.svg_top = QSvgWidget()
+        self.svg_top.setFixedSize(size, size)
+        self.svg_bottom = QSvgWidget()
+        self.svg_bottom.setFixedSize(size, size)
         make_grid(self, [
             [label],
-            [self.top_pic, self.bottom_pic],
+            [self.svg_top, self.svg_bottom],
         ])
 
         self.setStyleSheet('ScrambleViewWidget { background-color: #999; '
                 'font: 24px; }')
 
     def set_scramble(self, scramble):
-        self.scramble = scramble
-        self.update()
+        cube = solver.Cube()
+        cube.run_alg(' '.join(scramble))
 
-    # Handle the paint event so we can use an OpenGL context to render the
-    # scramble. The scramble can get updated from the bluetooth thread and
-    # we can't render from there.
-    def paintEvent(self, event):
-        if self.scramble is not self.last_scramble:
-            cube = solver.Cube()
-            cube.run_alg(' '.join(self.scramble))
-            for [pic, ax, ay] in [[self.top_pic, 30, 45],
-                    [self.bottom_pic, -30, 225]]:
-                self.gl_widget.set_render_data(cube, [0]*6, [1, 0, 0, 0])
-                self.gl_widget.bg_color = [.6, .6, .6, 1]
-                self.gl_widget.set_ortho(ax, ay)
-                picture = self.gl_widget.grab()
-                pic.setPixmap(picture)
-            self.last_scramble = self.scramble
+        top_diag = render.gen_cube_diagram(cube)
+        bottom_diag = render.gen_cube_diagram(cube.run_alg('x2 z'),
+                transform='rotate(60)')
+
+        self.svg_top.load(top_diag.encode('ascii'))
+        self.svg_bottom.load(bottom_diag.encode('ascii'))
+
+        self.update()
 
 class SessionWidget(QWidget):
     def __init__(self, parent):
@@ -1773,7 +1762,6 @@ class GLWidget(QOpenGLWidget):
         self.view_rot_y = 30
         self.view_rot_z = 0
         self.size = None
-        self.ortho = None
         self.drag_start_vector = None
         self.bg_color = [.7, .7, .7, 1]
         self.cam_quat = [1, 0, 0, 0]
@@ -1784,9 +1772,6 @@ class GLWidget(QOpenGLWidget):
         self.turns = turns
         self.quat = quat
         self.update()
-
-    def set_ortho(self, ax, ay):
-        self.ortho = [ax, ay]
 
     def initializeGL(self):
         self.gl_init = True
@@ -1799,23 +1784,20 @@ class GLWidget(QOpenGLWidget):
         render.BG_COLOR = self.bg_color
         render.reset()
 
-        if self.ortho is not None:
-            render.set_ortho(self.size, *self.ortho)
-        else:
-            render.set_persective(self.size, self.zoom)
+        render.set_persective(self.size, self.zoom)
 
-            q = quat_mul(self.cam_quat, self.cam_base)
-            matrix = quat_matrix(quat_normalize(q))
-            render.rotate_camera(matrix)
+        q = quat_mul(self.cam_quat, self.cam_base)
+        matrix = quat_matrix(quat_normalize(q))
+        render.rotate_camera(matrix)
 
-            q = quat_mul(self.base_quat, self.quat)
-            matrix = quat_matrix(quat_normalize(q))
+        q = quat_mul(self.base_quat, self.quat)
+        matrix = quat_matrix(quat_normalize(q))
 
-            render.set_rotation(matrix)
+        render.set_rotation(matrix)
 
-            render.glRotatef(self.view_rot_x, 1, 0, 0)
-            render.glRotatef(self.view_rot_y, 0, -1, 0)
-            render.glRotatef(self.view_rot_z, 0, 0, 1)
+        render.glRotatef(self.view_rot_x, 1, 0, 0)
+        render.glRotatef(self.view_rot_y, 0, -1, 0)
+        render.glRotatef(self.view_rot_z, 0, 0, 1)
 
         render.render_cube(self.cube, self.turns)
 
