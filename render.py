@@ -269,7 +269,7 @@ def gen_cube_diagram(cube, transform=''):
     dy = 6*f
     sx = 0
     sy = -6*f
-    return f'''<svg viewBox='-6.1 -6.1 12.2 12.2' fill='transparent'>
+    return f'''<svg viewBox='-6.1 -6.1 12.2 12.2'>
             <clipPath id='clip'>
             <path d="M 0 {sy} l {d[0]} {d[1]} l 0 {dy}
                   l {-d[0]} {d[1]} l {-d[0]} {-d[1]} l 0 {-dy} z"/>

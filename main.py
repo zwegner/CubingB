@@ -27,13 +27,14 @@ import sys
 import time
 
 from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
-        QVariantAnimation)
+        QVariantAnimation, QBuffer, QByteArray, QPoint)
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QOpenGLWidget,
         QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
         QComboBox, QDialog, QDialogButtonBox, QAbstractItemView, QHeaderView,
         QFrame, QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog,
-        QMenu, QAction, QPlainTextEdit, QTabBar)
-from PyQt5.QtGui import QIcon, QFont, QFontDatabase
+        QMenu, QAction, QPlainTextEdit, QTabBar, QToolTip)
+from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
+        QRegion, QColor)
 from PyQt5.QtSvg import QSvgWidget
 
 import analyze
@@ -930,17 +931,41 @@ class InstructionWidget(QLabel):
 class ScrambleWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
+        self.scramble = None
+
         self.setStyleSheet('ScrambleWidget { font: 48px Courier; }')
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setWordWrap(True)
 
+        self.scramble_popup = ScrambleViewWidget(self)
+        self.scramble_popup.hide()
+        self.linkHovered.connect(self.hover_move)
+
+    def hover_move(self, link):
+        if link:
+            scramble = self.scramble[:int(link) + 1]
+            self.scramble_popup.set_scramble(scramble)
+            text = ' '.join(self.scramble_popup.get_b64_pics(100, 10))
+            QToolTip.showText(QCursor.pos(), text)
+
     def set_scramble(self, scramble, scramble_left):
+        self.scramble = scramble
         offset = max(len(scramble) - len(scramble_left), 0)
         left = ['-'] * len(scramble)
         for i in range(min(len(left), len(scramble_left))):
             left[offset+i] = scramble_left[i]
-        self.setText(' '.join('% -2s' % s for s in left))
+        # Generate the scramble moves with invisible links on each move.
+        # The links trigger a tooltip popup through the linkHovered event.
+        # And no, setting this style in the main stylesheet doesn't work...
+        moves = []
+        for [i, s] in enumerate(left):
+            m = ('<a style="color: #000; text-decoration: none;"'
+                    'href="%s">%s</a>' % (i, s))
+            if len(s) == 1:
+                m += ' '
+            moves.append(m)
+        self.setText(' '.join(moves))
         self.update()
 
 class ScrambleViewWidget(QFrame):
@@ -959,7 +984,7 @@ class ScrambleViewWidget(QFrame):
             [self.svg_top, self.svg_bottom],
         ])
 
-        self.setStyleSheet('ScrambleViewWidget { background-color: #999; '
+        self.setStyleSheet('ScrambleViewWidget { background-color: #aaa; '
                 'font: 24px; }')
 
     def set_scramble(self, scramble):
@@ -974,6 +999,28 @@ class ScrambleViewWidget(QFrame):
         self.svg_bottom.load(bottom_diag.encode('ascii'))
 
         self.update()
+
+    # Render top/bottom pics into img tags with base64-encoded data. Pretty dirty
+    # but this is seemingly required to get images in tooltips (and using widgets
+    # as makeshift tooltips seemed even worse).
+    # More info at https://stackoverflow.com/a/34300771
+    def get_b64_pics(self, size, margin):
+        for svg in [self.svg_top, self.svg_bottom]:
+            svg.setFixedSize(size, size)
+            isize = size + 2*margin
+            img = QImage(isize, isize, QImage.Format_RGB32)
+            img.fill(QColor(255, 255, 255))
+            ba = QByteArray()
+            buf = QBuffer(ba)
+            painter = QPainter(img)
+            svg.render(painter, QPoint(margin, margin), QRegion(),
+                    QWidget.RenderFlags(0))
+            # Uhh we get a segfault and this crazy warning without this del?!
+            # QPaintDevice: Cannot destroy paint device that is being painted
+            del painter
+            img.save(buf, 'PNG', 100)
+            data = bytes(ba.toBase64()).decode()
+            yield '<img src="data:image/png;base64, %s">' % data
 
 class SessionWidget(QWidget):
     def __init__(self, parent):
