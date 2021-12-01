@@ -251,13 +251,13 @@ class CubeWindow(QMainWindow):
             [self.tab_bar], 
             [title, buttons],
             [self.session_widget]
-        ])
-        left.setStyleSheet('SessionWidget, QTabBar { max-width: 350px; }')
+        ], margin=0, widths=[0, 40])
+        left.setStyleSheet('SessionWidget, QTabBar { min-width: 300px; max-width: 350px; }')
 
         top = QWidget()
         top.setObjectName('top')
-        make_hbox(top, [self.instruction_widget, self.smart_playback_widget,
-                self.scramble_widget])
+        make_grid(top, [[self.instruction_widget, self.smart_playback_widget,
+                self.scramble_widget]], margin=0)
 
         # Create an overlapping widget thingy so the scramble is above the timer
         timer_container = QWidget(main)
@@ -280,10 +280,9 @@ class CubeWindow(QMainWindow):
 
         # Annoying: set up style here in the parent, so it can be overridden
         # in children
-        self.setStyleSheet('TimerWidget { font: 240px; }'
-                'BluetoothStatusWidget { font: 24px; '
+        self.setStyleSheet('BluetoothStatusWidget { font: 24px; '
                 '   color: #FFF; background: rgb(80,80,255); padding: 5px; }'
-                '#top > * { padding-right: 100px; }')
+                '#top { min-width: 300px; }')
 
         # Set up default mode
         self.set_mode(Mode.TIMER)
@@ -334,6 +333,13 @@ class CubeWindow(QMainWindow):
 
     def sizeHint(self):
         return QSize(*WINDOW_SIZE)
+
+    def resizeEvent(self, event):
+        size = event.size()
+        size = min(size.width() - 350, size.height())
+        self.timer_widget.resize(int(size * .22))
+        self.scramble_widget.resize(int(size * .07))
+        self.scramble_view_widget.resize(int(size * .18))
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_C:
@@ -909,10 +915,21 @@ class TimerWidget(QLabel):
         font = QFontDatabase.addApplicationFont(path)
         self.setFont(QFont(QFontDatabase.applicationFontFamilies(font)[0]))
 
-    def set_pending(self, pending):
-        color = 'red' if pending else 'black'
-        self.setStyleSheet('color: %s;' % color)
+        self.color = 'black'
+        self.size = 240
+        self.update_font()
+
+    def update_font(self):
+        self.setStyleSheet('font: %spx; color: %s;' % (self.size, self.color))
         self.update()
+
+    def resize(self, size):
+        self.size = size
+        self.update_font()
+
+    def set_pending(self, pending):
+        self.color = 'red' if pending else 'black'
+        self.update_font()
 
     def update_time(self, t, prec):
         self.setText(ms_str(t * 1000, prec=prec))
@@ -933,7 +950,8 @@ class ScrambleWidget(QLabel):
         super().__init__(parent)
         self.scramble = None
 
-        self.setStyleSheet('ScrambleWidget { font: 48px Courier; }')
+        self.resize(48)
+
         # This shit should really be in the stylesheet, but not supported?!
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setWordWrap(True)
@@ -941,6 +959,9 @@ class ScrambleWidget(QLabel):
         self.scramble_popup = ScrambleViewWidget(self)
         self.scramble_popup.hide()
         self.linkHovered.connect(self.hover_move)
+
+    def resize(self, size):
+        self.setStyleSheet('font: %spx Courier;' % size)
 
     def hover_move(self, link):
         if link:
@@ -973,19 +994,21 @@ class ScrambleViewWidget(QFrame):
         super().__init__(parent)
 
         # Build layout for scramble view
-        label = QLabel('Scramble')
-        label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.svg_top = QSvgWidget()
         self.svg_top.setFixedSize(size, size)
         self.svg_bottom = QSvgWidget()
         self.svg_bottom.setFixedSize(size, size)
         make_grid(self, [
-            [label],
             [self.svg_top, self.svg_bottom],
         ])
+        self.setStyleSheet('ScrambleViewWidget { background-color: #bbb; '
+                'border: 2px solid #777; border-style: outset; } ')
 
-        self.setStyleSheet('ScrambleViewWidget { background-color: #aaa; '
-                'font: 24px; }')
+    def resize(self, size):
+        self.svg_top.setFixedSize(size, size)
+        self.svg_bottom.setFixedSize(size, size)
+
+        self.update()
 
     def set_scramble(self, scramble):
         cube = solver.Cube()
@@ -1050,9 +1073,11 @@ class SessionWidget(QWidget):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
-        title = QWidget()
-        make_hbox(title, [self.label, self.selector])
-        self.layout = make_vbox(self, [title, self.stats, self.table])
+        self.layout = make_grid(self, [
+            [self.label, self.selector],
+            [self.stats],
+            [self.table],
+        ], margin=0)
 
         self.session_editor = SessionEditorDialog(self)
         self.session_selector = SessionSelectorDialog(self)
@@ -1151,7 +1176,7 @@ class SessionWidget(QWidget):
             self.layout.removeWidget(self.stats)
             self.stats = QWidget()
             self.stats.setStyleSheet('QLabel { font: 16px; }')
-            self.layout.insertWidget(1, self.stats)
+            self.layout.addWidget(self.stats, 1, 0, 1, 2)
 
             if not solves:
                 self.update()
