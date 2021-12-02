@@ -1052,6 +1052,14 @@ class SessionWidget(QWidget):
         self.label.setStyleSheet('font: 18px; font-weight: bold;')
         self.selector = QComboBox()
         self.selector.currentIndexChanged.connect(self.change_session)
+        new_icon = QIcon('rsrc/material/add_black_24dp.svg')
+        new = QPushButton(new_icon, '')
+        new.setStyleSheet('border: none; max-width: 20px;')
+        new.clicked.connect(self.new_session)
+        edit_icon = QIcon('rsrc/material/edit_note_black_24dp.svg')
+        edit = QPushButton(edit_icon, '')
+        edit.setStyleSheet('border: none; max-width: 20px;')
+        edit.clicked.connect(self.edit_sessions)
 
         self.stats = QWidget()
 
@@ -1072,10 +1080,10 @@ class SessionWidget(QWidget):
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
         self.layout = make_grid(self, [
-            [self.label, self.selector],
+            [self.label, self.selector, new, edit],
             [self.stats],
             [self.table],
-        ], margin=0)
+        ], stretch=[0, 1, 0, 0], margin=0)
 
         self.session_editor = SessionEditorDialog(self)
         self.session_selector = SessionSelectorDialog(self)
@@ -1136,22 +1144,28 @@ class SessionWidget(QWidget):
             if merge_id is not None:
                 self.trigger_update()
 
+    def new_session(self):
+        with db.get_session() as session:
+            settings = session.upsert(db.Settings, {})
+            sesh = session.insert(db.Session, name='New Session',
+                    scramble_type='3x3')
+            settings.current_session = sesh
+            session.flush()
+            self.trigger_update()
+
+    def edit_sessions(self):
+        with db.get_session() as session:
+            self.session_editor.update_items()
+            if not self.session_editor.exec():
+                session.rollback()
+            self.trigger_update()
+
     def change_session(self, index):
         with db.get_session() as session:
             settings = session.upsert(db.Settings, {})
 
             id = self.session_ids[index]
-            if id == 'new':
-                sesh = session.insert(db.Session, name='New Session',
-                        scramble_type='3x3')
-                settings.current_session = sesh
-            elif id == 'edit':
-                self.session_editor.update_items()
-                if not self.session_editor.exec():
-                    session.rollback()
-            else:
-                settings.current_session = session.query_first(db.Session, id=id)
-            session.flush()
+            settings.current_session = session.query_first(db.Session, id=id)
             self.trigger_update()
 
     def set_playback_mode(self, mode):
@@ -1175,9 +1189,6 @@ class SessionWidget(QWidget):
                 self.selector.addItem(s.name)
                 if s.id == sesh.id:
                     self.selector.setCurrentIndex(len(self.session_ids) - 1)
-            for cmd in ['new', 'edit']:
-                self.session_ids.append(cmd)
-                self.selector.addItem(cmd.title() + '...')
 
             self.selector.blockSignals(False)
 
@@ -1191,7 +1202,7 @@ class SessionWidget(QWidget):
             self.layout.removeWidget(self.stats)
             self.stats = QWidget()
             self.stats.setStyleSheet('QLabel { font: 16px; }')
-            self.layout.addWidget(self.stats, 1, 0, 1, 2)
+            self.layout.addWidget(self.stats, 1, 0, 1, 4)
 
             if self.playback_mode:
                 self.stats.hide()
