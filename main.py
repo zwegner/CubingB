@@ -1593,7 +1593,8 @@ class SmartPlaybackWidget(QWidget):
         start_button.clicked.connect(lambda: self.scrub(0))
         end_icon = QIcon('rsrc/material/skip_next_black_24dp.svg')
         end_button = QPushButton(end_icon, '')
-        end_button.clicked.connect(lambda: self.scrub(len(self.events) - 1))
+        end_button.clicked.connect(lambda: self.events and
+                self.scrub(len(self.events) - 1))
 
         controls = QWidget()
         controls.setStyleSheet('QPushButton { icon-size: 40px 40px; '
@@ -1626,6 +1627,7 @@ class SmartPlaybackWidget(QWidget):
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.play_event)
 
+        self.solve = None
         self.events = None
         self.event_idx = None
         self.playing = False
@@ -1633,6 +1635,8 @@ class SmartPlaybackWidget(QWidget):
         self.base_ts = 0
 
     def set_playing(self, playing):
+        if self.solve is None:
+            return
         self.playing = playing
         if playing:
             self.play_button.setIcon(self.pause_icon)
@@ -1651,6 +1655,8 @@ class SmartPlaybackWidget(QWidget):
         self.set_playing(not self.playing)
 
     def play_event(self):
+        if self.solve is None:
+            return
         # Grab all the events that should have happened by this point (at least one)
         max_ts = self.base_ts + (time.time() - self.base_time) * 1000
         ts = self.events[self.event_idx].ts
@@ -1684,6 +1690,8 @@ class SmartPlaybackWidget(QWidget):
                 self.timer.start(max(0, int(next_time)))
 
     def scrub(self, event_idx):
+        if self.solve is None:
+            return
         # In case this came from start/end buttons, set the slider to new position
         self.slider.blockSignals(True)
         self.slider.setValue(event_idx)
