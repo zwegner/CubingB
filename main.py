@@ -177,6 +177,7 @@ class CubeWindow(QMainWindow):
         self.timer = None
         self.pending_timer = None
         self.smart_device = None
+        self.mode = None
 
         # Initialize DB and make sure there's a current session
         db.init_db(config.DB_PATH)
@@ -295,7 +296,7 @@ class CubeWindow(QMainWindow):
         self.bt_status_update.connect(self.bt_status_widget.update_status)
         self.bt_connected.connect(self.got_bt_connection)
 
-        # Initialize session state
+        # Initialize session state asynchronously
         self.schedule_fn.emit(self.session_widget.trigger_update)
 
     def run_scheduled_fn(self, fn):
@@ -305,11 +306,16 @@ class CubeWindow(QMainWindow):
         fn(*args)
 
     def set_mode(self, mode):
+        # Set session viewer to only show smart solves if we're in playback mode
+        if self.mode == Mode.PLAYBACK or mode == Mode.PLAYBACK:
+            self.session_widget.set_playback_mode(mode == Mode.PLAYBACK)
         self.mode = mode
         self.tab_bar.setCurrentIndex(int(mode))
 
     def change_tab(self, tab):
-        self.mode = Mode(tab)
+        mode = Mode(tab)
+        if mode != self.mode:
+            self.set_mode(mode)
         self.update_state_ui()
 
     def got_bt_connection(self, device):
@@ -1076,9 +1082,23 @@ class SessionWidget(QWidget):
         self.solve_editor = SolveEditorDialog(self)
         self.average_viewer = AverageDialog(self)
         self.graph_viewer = None
+        self.playback_mode = False
 
     def edit_solve(self, row, col):
         solve_id = self.table.item(row, 0).secret_data
+        # Playback mode: just open the solve immediately
+        if self.playback_mode:
+            with db.get_session() as session:
+                solve = session.query_first(db.Solve, id=solve_id)
+                solve_nb = get_solve_nb(session, solve)
+                # HACK
+                window = self.parent()
+                while not isinstance(window, CubeWindow):
+                    window = window.parent()
+                window.schedule_fn_args.emit(window.start_playback,
+                        (solve_id, solve_nb))
+            return
+
         # Change behavior based on whether the click is on the single/ao5/ao12
         if col == 0:
             self.solve_editor.update_solve(solve_id)
@@ -1134,6 +1154,10 @@ class SessionWidget(QWidget):
             session.flush()
             self.trigger_update()
 
+    def set_playback_mode(self, mode):
+        self.playback_mode = mode
+        self.trigger_update()
+
     def trigger_update(self):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
@@ -1170,41 +1194,59 @@ class SessionWidget(QWidget):
             self.stats.setStyleSheet('QLabel { font: 16px; }')
             self.layout.addWidget(self.stats, 1, 0, 1, 2)
 
+            if self.playback_mode:
+                self.stats.hide()
+            else:
+                self.stats.show()
+
             if not solves:
                 self.update()
                 return
 
-            # Calculate statistics, build stat table
-            stat_table = [[None, QLabel('current'), QLabel('best'), None]]
-            graph_icon = QIcon('rsrc/graph.svg')
-            analyze.calc_session_stats(sesh, solves)
-            for size in STAT_AO_COUNTS:
-                stat = stat_str(size)
-                graph_button = QPushButton(graph_icon, '')
-                graph_button.setStyleSheet('border: none;')
-                graph_button.clicked.connect(functools.partial(self.show_graph, stat))
-                mean = sesh.cached_stats_current[stat]
-                best = sesh.cached_stats_best[stat]
-                stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
-                        QLabel(ms_str(best)), graph_button])
+            if not self.playback_mode:
+                # Calculate statistics, build stat table
+                stat_table = [[None, QLabel('current'), QLabel('best'), None]]
+                graph_icon = QIcon('rsrc/graph.svg')
+                analyze.calc_session_stats(sesh, solves)
+                for size in STAT_AO_COUNTS:
+                    stat = stat_str(size)
+                    graph_button = QPushButton(graph_icon, '')
+                    graph_button.setStyleSheet('border: none;')
+                    graph_button.clicked.connect(
+                            functools.partial(self.show_graph, stat))
+                    mean = sesh.cached_stats_current[stat]
+                    best = sesh.cached_stats_best[stat]
+                    stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
+                            QLabel(ms_str(best)), graph_button])
 
-            make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
+                make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
 
+            # Skip non-smart solves if we're in playback mode. We have the
+            # skip logic here (as opposed to SQL) just to keep the solve
+            # numbers the same
+            filtered_solves = []
+            for [i, solve] in enumerate(solves):
+                if self.playback_mode and solve.smart_data_raw is None:
+                    continue
+                filtered_solves.append((len(solves) - i, solve))
 
             # Build the table of actual solves
-            self.table.setRowCount(len(solves))
+            self.table.setRowCount(len(filtered_solves))
 
-            for [i, solve] in enumerate(solves):
+            for [i, [n, solve]] in enumerate(filtered_solves):
+                # Skip non-smart solves if we're in playback mode. We have the
+                # skip logic here (as opposed to SQL) just to keep the solve
+                # numbers the same
+                if self.playback_mode and solve.smart_data_raw is None:
+                    continue
                 self.table.setVerticalHeaderItem(i,
-                        cell('%s' % (len(solves) - i)))
+                        cell('%s' % n))
                 # HACK: set the secret data so the solve editor gets the ID
                 self.table.setItem(i, 0, cell(ms_str(solve_time(solve)),
                         secret_data=solve.id))
                 stats = solve.cached_stats or {}
-                self.table.setItem(i, 1,
-                        cell(ms_str(stats.get('ao5'))))
-                self.table.setItem(i, 2,
-                        cell(ms_str(stats.get('ao12'))))
+                self.table.setItem(i, 1, cell(ms_str(stats.get('ao5'))))
+                self.table.setItem(i, 2, cell(ms_str(stats.get('ao12'))))
 
             self.update()
 
