@@ -264,17 +264,8 @@ def gen_cube_diagram(cube, transform=''):
                     cubies.append(f'''<path d="{paths[index]}"
                         fill="{SVG_COLORS[c]}" stroke="black" stroke-width=".15" />''') 
 
-    f = 1.015
-    d = [3*r3 * f, 3 * f]
-    dy = 6*f
-    sx = 0
-    sy = -6*f
     return f'''<svg viewBox='-6.1 -6.1 12.2 12.2'>
-            <clipPath id='clip'>
-            <path d="M 0 {sy} l {d[0]} {d[1]} l 0 {dy}
-                  l {-d[0]} {d[1]} l {-d[0]} {-d[1]} l 0 {-dy} z"/>
-            </clipPath>
-            <g clip-path='url(#clip)' transform="{transform}">
+            <g transform="{transform}">
               {' '.join(cubies)}
             </g>
         </svg>'''
