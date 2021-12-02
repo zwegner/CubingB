@@ -55,8 +55,6 @@ State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
 
 SCRAMBLE_MOVES = 25
 
-STAT_AO_COUNTS = [1, 5, 12, 25, 50, 100, 200, 500, 1000]
-
 TIMER_DEBOUNCE = .5
 
 INF = float('+inf')
@@ -108,12 +106,6 @@ def vec_len_sq(v):
     return a*a + b*b + c*c
 
 # UI helpers
-
-def stat_str(size):
-    if size == 1:
-        return 'single'
-    else:
-        return 'ao%s' % size
 
 def cell(text, editable=False, secret_data=None):
     item = QTableWidgetItem(text)
@@ -1182,60 +1174,22 @@ class SessionWidget(QWidget):
                 self.update()
                 return
 
+            # Calculate statistics, build stat table
             stat_table = [[None, QLabel('current'), QLabel('best'), None]]
-
-            # Calculate statistics
-
-            all_times = [solve_time(s) for s in solves]
-
             graph_icon = QIcon('rsrc/graph.svg')
-
-            stats_current = sesh.cached_stats_current or {}
-            stats_best = sesh.cached_stats_best or {}
-            for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
+            analyze.calc_session_stats(sesh, solves)
+            for size in STAT_AO_COUNTS:
                 stat = stat_str(size)
-                mean = analyze.calc_ao(all_times, 0, size)
-                stats_current[stat] = mean
-
-                # Update best stats, recalculating if necessary
-                if stat not in stats_best:
-                    best = None
-
-                    averages = None
-                    if size > 1:
-                        averages = iter(analyze.calc_rolling_ao(solves,
-                                all_times, size))
-
-                    for i in range(len(solves)):
-                        if size > 1:
-                            m = next(averages)
-                        else:
-                            m = all_times[i]
-
-                        # Update rolling cache stats
-                        if solves[i].cached_stats is None:
-                            solves[i].cached_stats = {}
-                        solves[i].cached_stats[stat] = m
-
-                        if not best or (m and m < best):
-                            best = m
-                    stats_best[stat] = best
-                else:
-                    best = stats_best[stat]
-                    if not best or mean < best:
-                        best = stats_best[stat] = mean
-
                 graph_button = QPushButton(graph_icon, '')
                 graph_button.setStyleSheet('border: none;')
                 graph_button.clicked.connect(functools.partial(self.show_graph, stat))
+                mean = sesh.cached_stats_current[stat]
+                best = sesh.cached_stats_best[stat]
                 stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
                         QLabel(ms_str(best)), graph_button])
 
             make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
 
-            sesh.cached_stats_current = stats_current
-            sesh.cached_stats_best = stats_best
-            solves[0].cached_stats = stats_current.copy()
 
             # Build the table of actual solves
             self.table.setRowCount(len(solves))

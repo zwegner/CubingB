@@ -20,13 +20,25 @@ import time
 
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout)
 
+# Global constants
+
 INF = float('+inf')
+
+STAT_AO_COUNTS = [1, 5, 12, 25, 50, 100, 200, 500, 1000]
+
+# Stat helpers
 
 @contextlib.contextmanager
 def time_execution(label):
     start = time.time()
     yield
     print('%s: %.3fs' % (label, time.time() - start))
+
+def stat_str(size):
+    if size == 1:
+        return 'single'
+    else:
+        return 'ao%s' % size
 
 def solve_time(solve):
     if solve.dnf:

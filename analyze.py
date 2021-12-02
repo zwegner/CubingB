@@ -171,6 +171,49 @@ def calc_rolling_ao(solves, all_times, size):
     for _ in range(size - 1):
         yield None
 
+# Given a session and an ordered list of solves, update all single/aoX statistics
+def calc_session_stats(sesh, solves):
+    all_times = [solve_time(s) for s in solves]
+
+    stats_current = sesh.cached_stats_current or {}
+    stats_best = sesh.cached_stats_best or {}
+    for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
+        stat = stat_str(size)
+        mean = calc_ao(all_times, 0, size)
+        stats_current[stat] = mean
+
+        # Update best stats, recalculating if necessary
+        if stat not in stats_best:
+            best = None
+
+            averages = None
+            if size > 1:
+                averages = iter(calc_rolling_ao(solves,
+                        all_times, size))
+
+            for i in range(len(solves)):
+                if size > 1:
+                    m = next(averages)
+                else:
+                    m = all_times[i]
+
+                # Update rolling cache stats
+                if solves[i].cached_stats is None:
+                    solves[i].cached_stats = {}
+                solves[i].cached_stats[stat] = m
+
+                if not best or (m and m < best):
+                    best = m
+            stats_best[stat] = best
+        else:
+            best = stats_best[stat]
+            if not best or mean < best:
+                best = stats_best[stat] = mean
+
+    sesh.cached_stats_current = stats_current
+    sesh.cached_stats_best = stats_best
+    solves[0].cached_stats = stats_current.copy()
+
 # Smart cube analysis stuff
 
 class SmartEvent:
