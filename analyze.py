@@ -171,6 +171,10 @@ def calc_rolling_ao(solves, all_times, size):
     for _ in range(size - 1):
         yield None
 
+def get_session_solves(session, sesh):
+    return (session.query(db.Solve).filter_by(session=sesh)
+            .order_by(db.Solve.created_at.desc()).all())
+
 # Given a session and an ordered list of solves, update all single/aoX statistics
 def calc_session_stats(sesh, solves):
     all_times = [solve_time(s) for s in solves]

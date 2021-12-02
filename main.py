@@ -1182,8 +1182,7 @@ class SessionWidget(QWidget):
             self.selector.blockSignals(False)
 
             # Get solves
-            solves = (session.query(db.Solve).filter_by(session=sesh)
-                    .order_by(db.Solve.created_at.desc()).all())
+            solves = analyze.get_session_solves(session, sesh)
 
             self.table.clearContents()
             self.table.setRowCount(0)
@@ -1597,6 +1596,11 @@ class SessionEditorDialog(QDialog):
 
             self.table.setRowCount(len(sessions))
             for [i, [sesh, n_solves]] in enumerate(sessions):
+                # Calculate stats if there's no cache
+                if sesh.cached_stats_best is None:
+                    solves = analyze.get_session_solves(session, sesh)
+                    analyze.calc_session_stats(sesh, solves)
+
                 stats = sesh.cached_stats_best or {}
                 sesh_id = session_sort_key(sesh)
                 self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
