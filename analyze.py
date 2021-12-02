@@ -216,7 +216,8 @@ def calc_session_stats(sesh, solves):
 
     sesh.cached_stats_current = stats_current
     sesh.cached_stats_best = stats_best
-    solves[0].cached_stats = stats_current.copy()
+    if solves:
+        solves[0].cached_stats = stats_current.copy()
 
 # Smart cube analysis stuff
 
