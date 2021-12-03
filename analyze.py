@@ -553,14 +553,11 @@ class AlgTrainer(QWidget):
                 assert len(self.move_times) == len(self.current_moves)
                 start = self.move_times[-len(moves.split())]
                 t = time.time() - start
-                a = '%s - %s' % (alg.alg_set, alg.alg_nb)
+                a = '%s - %s' % (alg.case.alg_set, alg.case.alg_nb)
 
                 # Generate diagram (should cache this or something)
-                cube = solver.Cube()
-                cube.run_alg('x2')
-                cube.run_alg(solver.invert_alg(moves))
-                diag = render.gen_cube_diagram(cube, ll_only=True,
-                        oll=(alg.alg_set == 'OLL'))
+                diag = render.gen_cube_diagram(alg.case.diagram,
+                        type=alg.case.diag_type)
 
                 self.recent_algs.insert(0, (t, a, diag))
                 self.recent_algs = self.recent_algs[:N_RECENT_ALGS]

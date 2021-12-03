@@ -99,10 +99,18 @@ class Solve(Base, NiceBase):
 
 Index('solve_session_idx', Solve.session_id, Solve.created_at)
 
-class Algorithm(Base, NiceBase):
-    __tablename__ = 'algorithms'
+class AlgCase(Base, NiceBase):
+    __tablename__ = 'alg_cases'
     alg_set = Column(String(32))
     alg_nb = Column(String(32))
+    diagram = Column(String(32))
+    diag_type = Column(String(32))
+    algs = relationship('Algorithm')
+
+class Algorithm(Base, NiceBase):
+    __tablename__ = 'algorithms'
+    alg_case_id = Column(Integer, ForeignKey(AlgCase.id))
+    case = relationship('AlgCase', back_populates='algs')
     moves = Column(String(256))
     notes = Column(Text)
 
