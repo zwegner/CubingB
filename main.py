@@ -598,7 +598,7 @@ class CubeWindow(QMainWindow):
             if not self.scramble_left:
                 s_face = s_turn = None
             else:
-                [s_face, s_face] = solver.parse_move(self.scramble_left[0])
+                [s_face, s_turn] = solver.parse_move(self.scramble_left[0])
 
             if face == s_face:
                 s_turn = (s_turn - turn) % 4
