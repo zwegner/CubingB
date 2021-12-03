@@ -49,15 +49,13 @@ from util import *
 
 WINDOW_SIZE = [1600, 1000]
 
-Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK ALG_TRAINING', start=0)
+Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK ALG_TRAIN ALG_VIEW', start=0)
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
         'SMART_SCRAMBLED SMART_SOLVING')
 
 SCRAMBLE_MOVES = 25
 
 TIMER_DEBOUNCE = .5
-
-INF = float('+inf')
 
 # Basic header to support future metadata/versioning/etc for smart data
 SMART_DATA_VERSION = 2
@@ -106,16 +104,6 @@ def vec_len_sq(v):
     return a*a + b*b + c*c
 
 # UI helpers
-
-def cell(text, editable=False, secret_data=None):
-    item = QTableWidgetItem(text)
-    if not editable:
-        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-    # Just set an attribute on the cell to pass data around?
-    # Probably not supposed to do this but it works
-    if secret_data is not None:
-        item.secret_data = secret_data
-    return item
 
 def session_sort_key(s):
     if s.sort_id is not None:
@@ -197,6 +185,7 @@ class CubeWindow(QMainWindow):
         self.instruction_widget = InstructionWidget(self)
         self.timer_widget = TimerWidget(self)
         self.alg_trainer_widget = analyze.AlgTrainer(self)
+        self.alg_viewer_widget = analyze.AlgViewer(self)
         self.session_widget = SessionWidget(self)
         self.smart_playback_widget = SmartPlaybackWidget(self)
         self.bt_status_widget = BluetoothStatusWidget(self)
@@ -231,9 +220,8 @@ class CubeWindow(QMainWindow):
 
         # Set up left
         self.tab_bar = QTabBar()
-        self.tab_bar.addTab('Timer')
-        self.tab_bar.addTab('Playback')
-        self.tab_bar.addTab('Trainer')
+        for mode in ['Timer', 'Watch', 'Train', 'Algs']:
+            self.tab_bar.addTab(mode)
         self.tab_bar.currentChanged.connect(self.change_tab)
 
         title = QLabel('CubingB')
@@ -262,7 +250,7 @@ class CubeWindow(QMainWindow):
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         make_vbox(right, [top, self.gl_widget, timer_container,
-                self.alg_trainer_widget])
+                self.alg_trainer_widget, self.alg_viewer_widget], margin=0)
 
         # Make grid and overlapping status widget
         grid = make_grid(main, [[left, right]])
@@ -400,6 +388,7 @@ class CubeWindow(QMainWindow):
         self.instruction_widget.hide()
         self.timer_widget.hide()
         self.alg_trainer_widget.hide()
+        self.alg_viewer_widget.hide()
 
         self.timer_widget.set_pending(False)
 
@@ -429,8 +418,11 @@ class CubeWindow(QMainWindow):
             self.smart_playback_widget.show()
             self.gl_widget.show()
         # Alg Training mode
-        elif self.mode == Mode.ALG_TRAINING:
+        elif self.mode == Mode.ALG_TRAIN:
             self.alg_trainer_widget.show()
+        # Alg Viewer mode
+        elif self.mode == Mode.ALG_VIEW:
+            self.alg_viewer_widget.show()
 
     def start_pending(self):
         self.pending_start = time.time()
@@ -581,7 +573,7 @@ class CubeWindow(QMainWindow):
         old_state = self.state
 
         # Alg training mode: just let the trainer handle all the logic
-        if self.mode == Mode.ALG_TRAINING:
+        if self.mode == Mode.ALG_TRAIN:
             self.alg_trainer_widget.make_move(face, turn)
             return
 

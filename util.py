@@ -18,7 +18,8 @@
 import contextlib
 import time
 
-from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout)
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout, QTableWidgetItem)
 
 # Global constants
 
@@ -72,14 +73,26 @@ def ms_str(ms, prec=3):
 
 # Qt helpers
 
+def cell(text, editable=False, secret_data=None):
+    item = QTableWidgetItem(text)
+    if not editable:
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+    # Just set an attribute on the cell to pass data around?
+    # Probably not supposed to do this but it works
+    if secret_data is not None:
+        item.secret_data = secret_data
+    return item
+
 def make_hbox(parent, children):
     layout = QHBoxLayout(parent)
     for c in children:
         layout.addWidget(c)
     return layout
 
-def make_vbox(parent, children):
+def make_vbox(parent, children, margin=None):
     layout = QVBoxLayout(parent)
+    if margin is not None:
+        layout.setContentsMargins(margin, margin, margin, margin)
     for c in children:
         layout.addWidget(c)
     return layout

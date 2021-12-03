@@ -16,6 +16,7 @@
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
 import collections
+import functools
 import gzip
 import itertools
 import math
@@ -26,10 +27,12 @@ import time
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
 from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox,
-        QWidget, QSizePolicy)
+        QWidget, QSizePolicy, QScrollArea, QTableWidget, QPushButton,
+        QHeaderView)
 from PyQt5.QtSvg import QSvgWidget
 
 import db
+import flow_layout
 import render
 import solver
 from util import *
@@ -374,6 +377,118 @@ class SmartSolve:
         c = solver.Cube().run_alg(self.scramble)
         c.run_alg(' '.join(self.reconstruction))
         self.solved = (c == solver.SOLVED_CUBE)
+
+# Show a diagram and a label for a certain alg case. This is just a widget
+# subclass so we can handle mouse clicks (there's no clicked signal in QWidget?!)
+class CaseCard(QWidget):
+    def __init__(self, parent, case):
+        super().__init__(parent)
+        self.parent = parent
+        self.case_id = case.id
+
+        # Generate diagram
+        diag = render.gen_cube_diagram(case.diagram, type=case.diag_type)
+        svg = QSvgWidget()
+        svg.setFixedSize(60, 60)
+        svg.load(diag.encode('ascii'))
+
+        label = QLabel('%s - %s' % (case.alg_set, case.alg_nb))
+        label.setStyleSheet('font: 14px; font-weight: bold;')
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        make_vbox(self, [svg, label])
+
+    def mouseReleaseEvent(self, event):
+        self.parent.select_case(self.case_id)
+
+class AlgViewer(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.recent_algs = []
+
+        self.case_id = None
+
+        # Build cards for each case
+        all_algs = collections.defaultdict(list)
+        with db.get_session() as session:
+            for case in session.query_all(db.AlgCase):
+                all_algs[case.alg_set].append(CaseCard(self, case))
+
+        # For each alg set, create a title label and a flow layout with all
+        # its cases
+        set_widgets = []
+        for [alg_set, algs] in all_algs.items():
+            title = QLabel(alg_set)
+            title.setStyleSheet('font: 18px; font-weight: bold;')
+            set_widgets.append(title)
+
+            widget = QWidget()
+            layout = flow_layout.FlowLayout(widget)
+            for s in algs:
+                layout.addWidget(s)
+            set_widgets.append(widget)
+
+        # Make main scrollable alg view
+        contents = QWidget()
+        make_vbox(contents, set_widgets)
+        scroll_area = QScrollArea(self)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setWidget(contents)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        title = QLabel('All Algs')
+        title.setStyleSheet('font: 24px; font-weight: bold;')
+
+        self.main_view = QWidget()
+        make_vbox(self.main_view, [title, scroll_area])
+
+        # Make alg detail view
+        left = QWidget()
+        self.alg_label = QLabel()
+        self.alg_label.setStyleSheet('font: 24px; font-weight: bold;')
+        self.alg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alg_icon = QSvgWidget()
+        back = QPushButton('Return to cases')
+        back.clicked.connect(functools.partial(self.select_case, None))
+        layout = make_vbox(left, [back, self.alg_icon, self.alg_label])
+        layout.addStretch(1)
+
+        self.alg_icon.setFixedSize(120, 120)
+        self.alg_table = QTableWidget()
+        self.alg_table.setColumnCount(1)
+        self.alg_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.alg_table.setStyleSheet('font: 20px;')
+
+        self.alg_detail = QWidget()
+        make_hbox(self.alg_detail, [left, self.alg_table])
+        self.alg_detail.hide()
+
+        make_vbox(self, [self.main_view, self.alg_detail], margin=0)
+
+    def select_case(self, case_id):
+        self.case_id = case_id
+        self.render()
+
+    def render(self):
+        if self.case_id is not None:
+            self.main_view.hide()
+            self.alg_detail.show()
+            with db.get_session() as session:
+                case = session.query_first(db.AlgCase, id=self.case_id)
+                self.alg_label.setText('%s - %s' % (case.alg_set, case.alg_nb))
+
+                diag = render.gen_cube_diagram(case.diagram, type=case.diag_type)
+                self.alg_icon.load(diag.encode('ascii'))
+
+                self.alg_table.clearContents()
+                self.alg_table.setRowCount(len(case.algs))
+                for [i, alg] in enumerate(case.algs):
+                    self.alg_table.setItem(i, 0, cell(alg.moves))
+        else:
+            self.main_view.show()
+            self.alg_detail.hide()
+        self.update()
 
 # Alg training stuff
 
