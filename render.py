@@ -189,14 +189,17 @@ def render_cube(cube, turns):
 # SVG diagram generation stuff. Not OpenGL like the rest of this
 # file, but main.py is bloated so just chuck it in here I guess.
 
-SVG_COLORS = [
-    '#fff',
-    '#ff0',
-    '#d00',
-    '#f92',
-    '#0b0',
-    '#00f',
-]
+SVG_COLORS = {
+    'w': '#fff',
+    'y': '#ff0',
+    'r': '#d00',
+    'o': '#f92',
+    'g': '#0b0',
+    'b': '#00f',
+    '-': '#777',
+}
+
+COLOR_MAP = 'wyrogb'
 
 EDGE_COORDS = {}
 CORNER_COORDS = {}
@@ -231,7 +234,6 @@ def gen_svg_tables():
         [-3 * r3, -3],
         [0, 0],
     ]
-
 
     # Map cube indices to SVG coordinates
     for [color, direction, coord_xform] in face_coords:
@@ -290,25 +292,43 @@ def gen_svg_tables():
 
                         result[(index, i)] = path
 
+def gen_cube_diagram(cube, transform='', type='normal'):
+    result = []
+    coords = LL_COORDS if type in {'pll', 'oll'} else COORDS
 
-def gen_cube_diagram(cube, transform='', ll_only=False, oll=False):
-    # Render cube
-    dumb_centers = [[c] for c in cube.centers]
+    # Collect color/coordinate pairs for a regular cube
+    if isinstance(cube, solver.Cube):
+        dumb_centers = [[c] for c in cube.centers]
 
-    coords = LL_COORDS if ll_only else COORDS
+        for [cubie_set, paths] in zip([cube.edges, cube.corners,
+                dumb_centers], coords):
+            for [i, cubie] in enumerate(cubie_set):
+                for [j, c] in enumerate(cubie):
+                    index = (i, j)
+                    if index in paths:
+                        if type == 'oll' and c != solver.Y:
+                            c = '-'
+                        else:
+                            c = COLOR_MAP[c]
 
-    # Render edges/corners/centers
-    cubies = []
-    for [cubie_set, paths] in zip([cube.edges, cube.corners, dumb_centers], coords):
-        for [i, cubie] in enumerate(cubie_set):
-            for [j, c] in enumerate(cubie):
-                index = (i, j)
-                if index in paths:
-                    color = SVG_COLORS[c]
-                    if oll and c != solver.Y:
-                        color = '#777'
-                    cubies.append(f'''<path d="{paths[index]}"
-                        fill="{color}" stroke="black" stroke-width=".15" />''') 
+                        color = SVG_COLORS[c]
+                        result.append((color, paths[index]))
+    # Collect color/coordinate pairs for a string diagram
+    else:
+        # Ugh this code sucks ass
+        n = 0
+        for [[x, y], paths] in zip([[12, 2], [8, 3], [6, 1]], coords):
+            for i in range(x):
+                for j in range(y):
+                    index = (i, j)
+                    if index in paths:
+                        result.append((SVG_COLORS[cube[n]], paths[index]))
+                        n += 1
+
+    # Render SVG
+    cubies = [f'''<path d="{path}"
+            fill="{color}" stroke="black" stroke-width=".15" />'''
+            for [color, path] in result]
 
     return f'''<svg viewBox='-6.1 -6.1 12.2 12.2'>
             <g transform="{transform}">
