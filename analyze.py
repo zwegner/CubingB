@@ -539,7 +539,10 @@ class AlgTrainer(QWidget):
                 moves = []
                 # Parse the alg to remove rotations
                 cube = solver.Cube()
-                for move in alg.moves.split():
+                alg_moves = alg.moves.split()
+                if alg_moves[0].startswith('y'):
+                    alg_moves.pop(0)
+                for move in alg_moves:
                     [m] = solver.parse_alg(move)
                     [_, _, f1, t1, f2, t2] = m
                     if f1 is not None:
