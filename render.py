@@ -205,6 +205,7 @@ EDGE_COORDS = {}
 CORNER_COORDS = {}
 CENTER_COORDS = {}
 COORDS = [EDGE_COORDS, CORNER_COORDS, CENTER_COORDS]
+ALL_COORDS = []
 
 LL_EDGE_COORDS = {}
 LL_CORNER_COORDS = {}
@@ -237,8 +238,8 @@ def gen_svg_tables():
 
     # Map cube indices to SVG coordinates
     for [color, direction, coord_xform] in face_coords:
-        for x in range(3):
-            for y in range(3):
+        for y in range(3):
+            for x in range(3):
                 coord = coord_xform(x, y)
 
                 for [table, lookup, result] in [[EDGES, solver.EDGES, EDGE_COORDS],
@@ -258,6 +259,7 @@ def gen_svg_tables():
                                         f'l {dy[0]} {dy[1]} l {-dx[0]} {-dx[1]} z')
 
                                 result[(index, i)] = path
+                                ALL_COORDS.append(path)
 
     # Map again but only for LL pieces
     for x in range(3):
@@ -294,10 +296,10 @@ def gen_svg_tables():
 
 def gen_cube_diagram(cube, transform='', type='normal'):
     result = []
-    coords = LL_COORDS if type in {'pll', 'oll'} else COORDS
-
     # Collect color/coordinate pairs for a regular cube
     if isinstance(cube, solver.Cube):
+        coords = LL_COORDS if type in {'pll', 'oll'} else COORDS
+
         dumb_centers = [[c] for c in cube.centers]
 
         for [cubie_set, paths] in zip([cube.edges, cube.corners,
@@ -315,15 +317,22 @@ def gen_cube_diagram(cube, transform='', type='normal'):
                         result.append((color, paths[index]))
     # Collect color/coordinate pairs for a string diagram
     else:
-        # Ugh this code sucks ass
-        n = 0
-        for [[x, y], paths] in zip([[12, 2], [8, 3], [6, 1]], coords):
-            for i in range(x):
-                for j in range(y):
-                    index = (i, j)
-                    if index in paths:
-                        result.append((SVG_COLORS[cube[n]], paths[index]))
-                        n += 1
+        if type in {'pll', 'oll'}:
+            coords = LL_COORDS 
+
+            # Ugh this code sucks ass
+            n = 0
+            for [[x, y], paths] in zip([[12, 2], [8, 3], [6, 1]], coords):
+                for i in range(x):
+                    for j in range(y):
+                        index = (i, j)
+                        if index in paths:
+                            result.append((SVG_COLORS[cube[n]], paths[index]))
+                            n += 1
+        else:
+            for [c, path] in zip(cube, ALL_COORDS):
+                result.append((SVG_COLORS[c], path))
+
 
     # Render SVG
     cubies = [f'''<path d="{path}"
