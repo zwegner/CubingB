@@ -974,7 +974,7 @@ class ScrambleWidget(QLabel):
             m = ('<a style="color: #000; text-decoration: none;"'
                     'href="%s">%s</a>' % (i, s))
             if len(s) == 1:
-                m += ' '
+                m += '&nbsp;'
             moves.append(m)
         self.setText(' '.join(moves))
         self.update()
