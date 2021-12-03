@@ -23,11 +23,14 @@ import re
 import struct
 import time
 
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
 from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox,
         QWidget, QSizePolicy)
+from PyQt5.QtSvg import QSvgWidget
 
 import db
+import render
 import solver
 from util import *
 
@@ -377,6 +380,9 @@ class SmartSolve:
 N_RECENT_ALGS = 10
 
 class AlgTrainer(QWidget):
+    # Signal to async call on main thread (like in main.py)
+    schedule_fn = pyqtSignal([object])
+
     def __init__(self, parent):
         super().__init__(parent)
         self.recent_algs = []
@@ -388,14 +394,20 @@ class AlgTrainer(QWidget):
 
         recents = QWidget(self)
         recents.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.recent = [[QLabel(), QLabel()] for y in range(N_RECENT_ALGS)]
+        self.recent = [[QLabel(), QLabel(), QSvgWidget()]
+                for y in range(N_RECENT_ALGS)]
         make_grid(recents, self.recent)
 
         make_vbox(self, [title, self.current, recents])
 
         self.reset()
 
+        self.schedule_fn.connect(self.run_scheduled_fn, type=Qt.QueuedConnection)
+
         self.build_regex()
+
+    def run_scheduled_fn(self, fn):
+        fn()
 
     # Build a regex of all the algs in the db. I had started to build a trie to
     # match the current moves to a list of known algorithms, and seeing the
@@ -494,14 +506,19 @@ class AlgTrainer(QWidget):
         self.move_times = []
         self.last_face = None
         self.last_turn = None
-        self.render()
+        self.schedule_fn.emit(self.render_current)
+        self.schedule_fn.emit(self.render_recent)
 
-    def render(self):
+    def render_current(self):
         self.current.setText(' '.join(self.current_moves))
-        for [l, [t, a]] in zip(self.recent, self.recent_algs):
-            l[0].setText(ms_str(t * 1000))
-            l[1].setText(a)
+        self.update()
 
+    def render_recent(self):
+        for [l, [t, alg, diag]] in zip(self.recent, self.recent_algs):
+            l[0].setText(ms_str(t * 1000))
+            l[1].setText(alg)
+            l[2].setFixedSize(50, 50)
+            l[2].load(diag.encode('ascii'))
         self.update()
 
     def make_move(self, face, turn):
@@ -530,19 +547,28 @@ class AlgTrainer(QWidget):
         done = False
         if match:
             alg_id = match.lastgroup
-            moves = match.group(alg_id).split()
+            moves = match.group(alg_id)
             with db.get_session() as session:
                 alg = session.query_first(db.Algorithm, id=int(alg_id[1:]))
                 assert len(self.move_times) == len(self.current_moves)
-                start = self.move_times[-len(moves)]
+                start = self.move_times[-len(moves.split())]
                 t = time.time() - start
                 a = '%s - %s' % (alg.alg_set, alg.alg_nb)
-                self.recent_algs.insert(0, (t, a))
+
+                # Generate diagram (should cache this or something)
+                cube = solver.Cube()
+                cube.run_alg('x2')
+                cube.run_alg(solver.invert_alg(moves))
+                diag = render.gen_cube_diagram(cube, ll_only=True,
+                        oll=(alg.alg_set == 'OLL'))
+
+                self.recent_algs.insert(0, (t, a, diag))
                 self.recent_algs = self.recent_algs[:N_RECENT_ALGS]
 
+            # Reset will also render
             self.reset()
-
-        self.render()
+        else:
+            self.render_current()
 
 GRAPH_TYPES = ['adaptive', 'date', 'count']
 

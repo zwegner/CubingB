@@ -198,26 +198,15 @@ SVG_COLORS = [
     '#00f',
 ]
 
-r3 = 3 ** .5
-DXS = [
-    [r3, 1],
-    [r3, 1],
-    [r3, -1],
-]
-DYS = [
-    [-r3, 1],
-    [0, 2],
-    [0, 2],
-]
-BASE = [
-    [0, -6],
-    [-3 * r3, -3],
-    [0, 0],
-]
-
 EDGE_COORDS = {}
 CORNER_COORDS = {}
 CENTER_COORDS = {}
+COORDS = [EDGE_COORDS, CORNER_COORDS, CENTER_COORDS]
+
+LL_EDGE_COORDS = {}
+LL_CORNER_COORDS = {}
+LL_CENTER_COORDS = {}
+LL_COORDS = [LL_EDGE_COORDS, LL_CORNER_COORDS, LL_CENTER_COORDS]
 
 def gen_svg_tables():
     face_coords = [
@@ -226,6 +215,25 @@ def gen_svg_tables():
         [solver.R, 2, lambda i, j: (2, j, 2-i)],
     ]
 
+    r3 = 3 ** .5
+    dxs = [
+        [r3, 1],
+        [r3, 1],
+        [r3, -1],
+    ]
+    dys = [
+        [-r3, 1],
+        [0, 2],
+        [0, 2],
+    ]
+    base = [
+        [0, -6],
+        [-3 * r3, -3],
+        [0, 0],
+    ]
+
+
+    # Map cube indices to SVG coordinates
     for [color, direction, coord_xform] in face_coords:
         for x in range(3):
             for y in range(3):
@@ -238,9 +246,9 @@ def gen_svg_tables():
                         index = table.index(coord)
                         for [i, c] in enumerate(lookup[index]):
                             if c == color:
-                                dx = DXS[direction]
-                                dy = DYS[direction]
-                                b = BASE[direction]
+                                dx = dxs[direction]
+                                dy = dys[direction]
+                                b = base[direction]
                                 sx = x * dx[0] + y * dy[0] + b[0]
                                 sy = y * dy[1] + x * dx[1] + b[1]
 
@@ -249,20 +257,58 @@ def gen_svg_tables():
 
                                 result[(index, i)] = path
 
-def gen_cube_diagram(cube, transform=''):
+    # Map again but only for LL pieces
+    for x in range(3):
+        for z in range(3):
+            coord = (x, 0, z)
+            for [table, lookup, result] in [[EDGES, solver.EDGES, LL_EDGE_COORDS],
+                    [CORNERS, solver.CORNERS, LL_CORNER_COORDS],
+                    [CENTERS, DUMB_CENTERS, LL_CENTER_COORDS]]:
+                if coord in table:
+                    index = table.index(coord)
+                    for [i, c] in enumerate(lookup[index]):
+                        if c == solver.W:
+                            d = 3
+                            sx = (x - 1.5) * d
+                            sz = (z - 1.5) * d
+                            path = (f'M {sx} {sz} l {0} {d} '
+                                    f'l {d} {0} l {0} {-d} z')
+                        else:
+                            d = 3
+                            sx = (x - 1.5) * d
+                            sz = (z - 1.5) * d
+                            if c == solver.G or c == solver.B:
+                                dx = d
+                                dz = d / 2
+                                sz += d if c == solver.G else -dz
+                            else:
+                                dx = d / 2
+                                dz = d
+                                sx += d if c == solver.R else -dx
+                            path = (f'M {sx} {sz} l {0} {dz} '
+                                    f'l {dx} {0} l {0} {-dz} z')
+
+                        result[(index, i)] = path
+
+
+def gen_cube_diagram(cube, transform='', ll_only=False, oll=False):
     # Render cube
     dumb_centers = [[c] for c in cube.centers]
 
+    coords = LL_COORDS if ll_only else COORDS
+
     # Render edges/corners/centers
     cubies = []
-    for [cubie_set, paths] in [[cube.edges, EDGE_COORDS],
-            [cube.corners, CORNER_COORDS], [dumb_centers, CENTER_COORDS]]:
+    for [cubie_set, paths] in zip([cube.edges, cube.corners, dumb_centers], coords):
         for [i, cubie] in enumerate(cubie_set):
             for [j, c] in enumerate(cubie):
                 index = (i, j)
                 if index in paths:
+                    color = SVG_COLORS[c]
+                    if oll and c != solver.Y:
+                        color = '#777'
                     cubies.append(f'''<path d="{paths[index]}"
-                        fill="{SVG_COLORS[c]}" stroke="black" stroke-width=".15" />''') 
+                        fill="{color}" stroke="black" stroke-width=".15" />''') 
 
     return f'''<svg viewBox='-6.1 -6.1 12.2 12.2'>
             <g transform="{transform}">

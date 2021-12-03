@@ -242,3 +242,10 @@ def parse_alg(alg):
 
         moves.append((rot, rn, face, n, f2, n2))
     return moves
+
+def invert_alg(alg):
+    moves = []
+    for m in reversed(alg.split()):
+        turn = parse_rot(m[1:])
+        moves.append(m[0] + TURN_STR[4 - turn])
+    return ' '.join(moves)
