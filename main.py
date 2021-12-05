@@ -419,9 +419,11 @@ class CubeWindow(QMainWindow):
             self.gl_widget.show()
         # Alg Training mode
         elif self.mode == Mode.ALG_TRAIN:
+            self.alg_trainer_widget.init()
             self.alg_trainer_widget.show()
         # Alg Viewer mode
         elif self.mode == Mode.ALG_VIEW:
+            self.alg_viewer_widget.init()
             self.alg_viewer_widget.show()
 
     def start_pending(self):
@@ -1081,7 +1083,7 @@ class SessionWidget(QWidget):
         self.session_selector = SessionSelectorDialog(self)
         self.solve_editor = SolveEditorDialog(self)
         self.average_viewer = AverageDialog(self)
-        self.graph_viewer = None
+        self.graph_viewer = analyze.GraphDialog(self)
         self.playback_mode = False
 
     def edit_solve(self, row, col):
@@ -1116,8 +1118,6 @@ class SessionWidget(QWidget):
     def show_graph(self, stat):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
-            if self.graph_viewer is None:
-                self.graph_viewer = analyze.GraphDialog(self)
             self.graph_viewer.update_data({sesh.name: sesh.solves}, stat=stat)
             self.graph_viewer.exec()
 
@@ -1514,7 +1514,7 @@ class SessionEditorDialog(QDialog):
         make_vbox(self, [self.table, button])
 
         self.session_selector = SessionSelectorDialog(self)
-        self.graph_viewer = None
+        self.graph_viewer = analyze.GraphDialog(self)
 
     def show_ctx_menu(self, pos):
         self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
@@ -1528,8 +1528,6 @@ class SessionEditorDialog(QDialog):
                 sesh = session.query_first(db.Session, id=id)
                 solve_sets[sesh.name] = sesh.solves
 
-            if self.graph_viewer is None:
-                self.graph_viewer = analyze.GraphDialog(self)
             self.graph_viewer.update_data(solve_sets, stat=stat)
             self.graph_viewer.exec()
 

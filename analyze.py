@@ -407,10 +407,14 @@ class CaseCard(QWidget):
 class AlgViewer(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
-        self.recent_algs = []
-
+        self.initialized = False
         self.case_id = None
         self.f2l_slot = None
+
+    def init(self):
+        if self.initialized:
+            return
+        self.initialized = True
 
         # Build cards for each case
         all_algs = collections.defaultdict(list)
@@ -527,7 +531,13 @@ class AlgTrainer(QWidget):
 
     def __init__(self, parent):
         super().__init__(parent)
+        self.initialized = False
         self.recent_algs = []
+
+    def init(self):
+        if self.initialized:
+            return
+        self.initialized = True
 
         title = QLabel('Alg Trainer')
         title.setStyleSheet('font: 24px;')
@@ -717,6 +727,13 @@ GRAPH_TYPES = ['adaptive', 'date', 'count']
 class GraphDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
+        self.initialized = False
+        self.solve_sets = None
+
+    def init(self):
+        if self.initialized:
+            return
+        self.initialized = True
 
         # Only import this crap here since it's pretty slow to import, and
         # this widget is instantiated lazily, all to improve startup time
@@ -741,7 +758,6 @@ class GraphDialog(QDialog):
 
         self.type = 'adaptive'
         self.stat = 'ao100'
-        self.solves = None
 
         make_grid(self, [
             [None, None, self.title, select_label, self.selector],
@@ -761,6 +777,8 @@ class GraphDialog(QDialog):
         self.render()
 
     def render(self):
+        self.init()
+
         if len(self.solve_sets) == 1:
             for name in self.solve_sets.keys():
                 self.title.setText('%s: %s' % (name, self.stat))
