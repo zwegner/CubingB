@@ -268,6 +268,8 @@ class CubeWindow(QMainWindow):
         # Set up default mode
         self.set_mode(Mode.TIMER)
         self.gen_scramble()
+        # Also set up initial render data
+        self.mark_changed()
 
         self.update_state_ui()
 
@@ -468,7 +470,7 @@ class CubeWindow(QMainWindow):
             self.scramble.append(solver.move_str(face, turn))
         self.scramble_left = self.scramble[:]
 
-        self.mark_changed()
+        self.mark_scramble_changed()
 
     # Initialize some data to record smart solve data. We do this before starting
     # the actual solve, since that logic only fires once the first turn is completed
@@ -546,6 +548,11 @@ class CubeWindow(QMainWindow):
             self.smart_cube_data = None
             self.smart_data_copy = None
 
+    def mark_scramble_changed(self):
+        self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
+        self.scramble_view_widget.set_scramble(self.scramble)
+        self.update()
+
     # Notify the cube widget that we've updated. We copy all the rendering
     # data to a new object so it can pick up a consistent view at its leisure
     def mark_changed(self, playback=False):
@@ -564,9 +571,8 @@ class CubeWindow(QMainWindow):
             turns = self.turns[:]
             quat = self.quat
 
-        self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
-        self.scramble_view_widget.set_scramble(self.scramble)
         self.gl_widget.set_render_data(cube, turns, quat)
+        self.update()
 
     # Make a move and update any state for either a scramble or a solve
     def make_turn(self, face, turn):
@@ -636,7 +642,7 @@ class CubeWindow(QMainWindow):
                 final_time = self.stop_solve()
                 self.schedule_fn_args.emit(self.stop_solve_ui, (final_time,))
 
-        # XXX handle after-solve-but-pre-scramble moves
+        self.mark_scramble_changed()
 
         if self.state != old_state:
             self.schedule_fn.emit(self.update_state_ui)
