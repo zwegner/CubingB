@@ -79,6 +79,7 @@ class Session(Base, NiceBase):
     scramble_type = Column(String(64))
     cached_stats_current = Column(JSON)
     cached_stats_best = Column(JSON)
+    cached_stats_best_solve_id = Column(JSON)
     solves = relationship('Solve')
 
 class Solve(Base, NiceBase):

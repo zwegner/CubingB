@@ -188,7 +188,7 @@ class CubeWindow(QMainWindow):
         self.alg_viewer_widget = analyze.AlgViewer(self)
         self.session_widget = SessionWidget(self)
         self.smart_playback_widget = SmartPlaybackWidget(self)
-        self.bt_status_widget = BluetoothStatusWidget(self)
+        self.status_widget = StatusWidget(self)
 
         # Set up bluetooth. This doesn't actually scan or anything yet
         self.bt_handler = bluetooth.BluetoothHandler(self)
@@ -254,14 +254,14 @@ class CubeWindow(QMainWindow):
 
         # Make grid and overlapping status widget
         grid = make_grid(main, [[left, right]])
-        grid.addWidget(self.bt_status_widget, 0, 1,
+        grid.addWidget(self.status_widget, 0, 1,
                 Qt.AlignRight | Qt.AlignBottom)
 
         self.setCentralWidget(main)
 
         # Annoying: set up style here in the parent, so it can be overridden
         # in children
-        self.setStyleSheet('BluetoothStatusWidget { font: 24px; '
+        self.setStyleSheet('StatusWidget { font: 24px; '
                 '   color: #FFF; background: rgb(80,80,255); padding: 5px; }'
                 '#top { min-width: 300px; }')
 
@@ -283,7 +283,7 @@ class CubeWindow(QMainWindow):
                 type=Qt.QueuedConnection)
         self.playback_events.connect(self.play_events)
         self.bt_scan_result.connect(self.bt_connection_dialog.update_device)
-        self.bt_status_update.connect(self.bt_status_widget.update_status)
+        self.bt_status_update.connect(self.send_notification)
         self.bt_connected.connect(self.got_bt_connection)
 
         # Initialize session state asynchronously
@@ -372,6 +372,9 @@ class CubeWindow(QMainWindow):
             self.update_state_ui()
         else:
             event.ignore()
+
+    def send_notification(self, text):
+        self.status_widget.update_status(text)
 
     def update_timer(self):
         if self.start_time is not None:
@@ -528,8 +531,9 @@ class CubeWindow(QMainWindow):
             self.timer = None
             self.timer_widget.update_time(final_time, 3)
 
-        # Update session state
-        self.session_widget.trigger_update()
+        # Update session state asynchronously
+        self.schedule_fn.emit(functools.partial(self.session_widget.trigger_update,
+                notify=True))
 
     # Smart cube stuff
 
@@ -866,9 +870,10 @@ class BluetoothConnectionDialog(QDialog):
             self.table.setItem(i, 1, cell(status))
         self.update()
 
-class BluetoothStatusWidget(QLabel):
+class StatusWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
+        self.text = None
         self.hide()
 
         # Set up fade out animation
@@ -888,16 +893,21 @@ class BluetoothStatusWidget(QLabel):
         self.update()
 
     def update_status(self, status):
-        self.setText(status)
+        if self.text is not None:
+            self.text += '\n' + status
+        else:
+            self.text = status
+        self.setText(self.text)
         self.show()
         self.fade_timer.stop()
-        self.fade_timer.start(3000)
+        self.fade_timer.start(5000)
         self.update()
 
     def fade(self):
         self.anim.start(QAbstractAnimation.KeepWhenStopped)
 
     def hide(self):
+        self.text = None
         super().hide()
         self.setStyleSheet('background: rgba(80,80,255,100%);')
 
@@ -1046,6 +1056,7 @@ class ScrambleViewWidget(QFrame):
 class SessionWidget(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
+        self.parent = parent
         self.setStyleSheet('SessionWidget { max-width: 350px; }')
 
         self.label = QLabel('Session:')
@@ -1099,11 +1110,7 @@ class SessionWidget(QWidget):
             with db.get_session() as session:
                 solve = session.query_first(db.Solve, id=solve_id)
                 solve_nb = get_solve_nb(session, solve)
-                # HACK
-                window = self.parent()
-                while not isinstance(window, CubeWindow):
-                    window = window.parent()
-                window.schedule_fn_args.emit(window.start_playback,
+                self.parent.schedule_fn_args.emit(window.start_playback,
                         (solve_id, solve_nb))
             return
 
@@ -1170,7 +1177,7 @@ class SessionWidget(QWidget):
         self.playback_mode = mode
         self.trigger_update()
 
-    def trigger_update(self):
+    def trigger_update(self, notify=False):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
 
@@ -1228,6 +1235,14 @@ class SessionWidget(QWidget):
                             QLabel(ms_str(best)), graph_button])
 
                 make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
+
+                # Check if this solve broke a record
+                if notify:
+                    for size in STAT_AO_COUNTS:
+                        stat = stat_str(size)
+                        last_solve = solves[0].id
+                        if sesh.cached_stats_best_solve_id.get(stat) == last_solve:
+                            self.parent.send_notification('Session best %s!' % stat)
 
             # Skip non-smart solves if we're in playback mode. We have the
             # skip logic here (as opposed to SQL) just to keep the solve
@@ -1353,7 +1368,7 @@ class SolveEditorDialog(QDialog):
     def delete_solve(self):
         response = QMessageBox.question(self, 'Confirm delete',
                 'Are you sure you want to delete this solve? This cannot '
-                ' be undone!', QMessageBox.Ok | QMessageBox.Cancel)
+                'be undone!', QMessageBox.Ok | QMessageBox.Cancel)
         if response == QMessageBox.Ok:
             with db.get_session() as session:
                 solve = session.query_first(db.Solve, id=self.solve_id)
