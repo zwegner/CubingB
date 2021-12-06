@@ -19,7 +19,8 @@ import contextlib
 import time
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout, QTableWidgetItem)
+from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
+        QTableWidgetItem, QHeaderView)
 
 # Global constants
 
@@ -118,3 +119,22 @@ def make_grid(parent, table, stretch=None, widths=None, margin=None):
         for [i, w] in enumerate(widths):
             layout.setColumnMinimumWidth(i, w)
     return layout
+
+# Set the column headers for a table.
+# The hacky 'stretch' parameter will stretch all columns if it's negative, or a
+# single column of the given id if nonnegative
+def set_table_columns(table, cols, stretch=None, visible=True):
+    table.setColumnCount(len(cols))
+    if visible:
+        for [i, item] in enumerate(cols):
+            if isinstance(item, str):
+                item = cell(item)
+            table.setHorizontalHeaderItem(i, item)
+    else:
+        table.horizontalHeader().hide()
+
+    if stretch is not None:
+        if stretch >= 0:
+            table.horizontalHeader().setSectionResizeMode(stretch, QHeaderView.Stretch)
+        else:
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)

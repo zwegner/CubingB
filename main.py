@@ -30,9 +30,9 @@ from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
         QVariantAnimation, QBuffer, QByteArray, QPoint)
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QOpenGLWidget,
         QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
-        QComboBox, QDialog, QDialogButtonBox, QAbstractItemView, QHeaderView,
-        QFrame, QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog,
-        QMenu, QAction, QPlainTextEdit, QTabBar, QToolTip)
+        QComboBox, QDialog, QDialogButtonBox, QAbstractItemView, QFrame,
+        QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog, QMenu,
+        QAction, QPlainTextEdit, QTabBar, QToolTip)
 from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
         QRegion, QColor)
 from PyQt5.QtSvg import QSvgWidget
@@ -806,10 +806,7 @@ class BluetoothConnectionDialog(QDialog):
         self.disconnect.clicked.connect(self.disconnect_device)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderItem(0, cell('Name'))
-        self.table.setHorizontalHeaderItem(1, cell('Status'))
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        set_table_columns(self.table, ['Name', 'Status'], stretch=-1)
         self.table.cellDoubleClicked.connect(self.connect_device)
 
         ok = QDialogButtonBox(QDialogButtonBox.Ok)
@@ -1081,11 +1078,8 @@ class SessionWidget(QWidget):
 
         self.table = QTableWidget()
         self.table.setStyleSheet('font: 16px')
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderItem(0, cell('Time'))
-        self.table.setHorizontalHeaderItem(1, cell('ao5'))
-        self.table.setHorizontalHeaderItem(2, cell('ao12'))
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        set_table_columns(self.table, ['Time', 'ao5', 'ao12'], stretch=-1)
+
         self.table.cellDoubleClicked.connect(self.edit_solve)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
@@ -1522,17 +1516,13 @@ class SessionEditorDialog(QDialog):
             self.ctx_menu.addAction(action)
 
         self.table = ReorderTableWidget(self, self.rows_reordered)
-        self.table.setColumnCount(4 + len(STAT_AO_COUNTS))
-        self.table.setHorizontalHeaderItem(0, cell('Name'))
-        self.table.setHorizontalHeaderItem(1, cell('Scramble'))
-        self.table.setHorizontalHeaderItem(2, cell('# Solves'))
-        self.table.setHorizontalHeaderItem(3, cell('Solve Reminder'))
-        for [i, stat] in enumerate(STAT_AO_COUNTS):
-            self.table.setHorizontalHeaderItem(4+i, cell(stat_str(stat)))
+        columns = ['Name', 'Scramble', '# Solves', 'Solve Reminder']
+        columns += [stat_str(stat) for stat in STAT_AO_COUNTS]
+
+        set_table_columns(self.table, columns, stretch=0)
+
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
-
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
 
         self.table.itemChanged.connect(self.edit_attr)
 

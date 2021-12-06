@@ -28,7 +28,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
 from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox,
         QWidget, QSizePolicy, QScrollArea, QTableWidget, QPushButton,
-        QHeaderView, QTabBar, QCheckBox)
+        QTabBar, QCheckBox)
 from PyQt5.QtSvg import QSvgWidget
 
 import db
@@ -422,11 +422,7 @@ class AlgTable(QWidget):
         self.f2l_tabs.currentChanged.connect(self.change_f2l_tab)
 
         self.alg_table = QTableWidget()
-        self.alg_table.setColumnCount(3)
-        self.alg_table.setHorizontalHeaderItem(0, cell('Alg'))
-        self.alg_table.setHorizontalHeaderItem(1, cell('Known?'))
-        self.alg_table.setHorizontalHeaderItem(2, cell('Ignore'))
-        self.alg_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        set_table_columns(self.alg_table, ['Alg', 'Known?', 'Ignore'], stretch=0)
         self.alg_table.setStyleSheet('font: 20px;')
 
         make_vbox(self, [self.f2l_tabs, self.alg_table], margin=0)
