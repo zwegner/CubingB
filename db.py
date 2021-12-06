@@ -115,6 +115,8 @@ class Algorithm(Base, NiceBase):
     f2l_slot = Column(String(16))
     moves = Column(String(256))
     notes = Column(Text)
+    known = Column(Boolean, default=False)
+    ignore = Column(Boolean, default=False)
 
 class AlgExecution(Base, NiceBase):
     __tablename__ = 'alg_execs'

@@ -28,7 +28,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
 from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox,
         QWidget, QSizePolicy, QScrollArea, QTableWidget, QPushButton,
-        QHeaderView, QTabBar)
+        QHeaderView, QTabBar, QCheckBox)
 from PyQt5.QtSvg import QSvgWidget
 
 import db
@@ -470,9 +470,11 @@ class AlgViewer(QWidget):
         self.f2l_tabs.currentChanged.connect(self.change_f2l_tab)
 
         self.alg_table = QTableWidget()
-        self.alg_table.setColumnCount(1)
-        self.alg_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.alg_table.horizontalHeader().hide()
+        self.alg_table.setColumnCount(3)
+        self.alg_table.setHorizontalHeaderItem(0, cell('Alg'))
+        self.alg_table.setHorizontalHeaderItem(1, cell('Known?'))
+        self.alg_table.setHorizontalHeaderItem(2, cell('Ignore'))
+        self.alg_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.alg_table.setStyleSheet('font: 20px;')
         right = QWidget()
         make_vbox(right, [self.f2l_tabs, self.alg_table], margin=0)
@@ -497,6 +499,11 @@ class AlgViewer(QWidget):
             self.f2l_slot = None
         self.render()
 
+    def change_alg_attr(self, alg_id, attr, value):
+        with db.get_session() as session:
+            alg = session.query_first(db.Algorithm, id=alg_id)
+            setattr(alg, attr, bool(value))
+
     def render(self):
         if self.case_id is not None:
             self.main_view.hide()
@@ -516,6 +523,12 @@ class AlgViewer(QWidget):
                 self.alg_table.setRowCount(len(algs))
                 for [i, alg] in enumerate(algs):
                     self.alg_table.setItem(i, 0, cell(alg.moves))
+                    for [j, attr] in [[1, 'known'], [2, 'ignore']]:
+                        cb = QCheckBox('')
+                        cb.setChecked(bool(getattr(alg, attr)))
+                        cb.stateChanged.connect(
+                                functools.partial(self.change_alg_attr, alg.id, attr))
+                        self.alg_table.setCellWidget(i, j, cb)
         else:
             self.main_view.show()
             self.alg_detail.hide()
