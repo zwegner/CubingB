@@ -1244,6 +1244,13 @@ class SessionWidget(QWidget):
                         if sesh.cached_stats_best_solve_id.get(stat) == last_solve:
                             self.parent.send_notification('Session best %s!' % stat)
 
+                    # ...or if the n-solve reminder is here
+                    n = sesh.notify_every_n_solves
+                    if n and len(solves) % n == 0:
+                        self.parent.send_notification('This is your %s-solve '
+                                'reminder!' % n)
+
+
             # Skip non-smart solves if we're in playback mode. We have the
             # skip logic here (as opposed to SQL) just to keep the solve
             # numbers the same
@@ -1519,8 +1526,9 @@ class SessionEditorDialog(QDialog):
         self.table.setHorizontalHeaderItem(0, cell('Name'))
         self.table.setHorizontalHeaderItem(1, cell('Scramble'))
         self.table.setHorizontalHeaderItem(2, cell('# Solves'))
+        self.table.setHorizontalHeaderItem(3, cell('Solve Reminder'))
         for [i, stat] in enumerate(STAT_AO_COUNTS):
-            self.table.setHorizontalHeaderItem(3+i, cell(stat_str(stat)))
+            self.table.setHorizontalHeaderItem(4+i, cell(stat_str(stat)))
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
@@ -1553,10 +1561,14 @@ class SessionEditorDialog(QDialog):
             self.graph_viewer.exec()
 
     def edit_attr(self, item):
-        [id, attr] = item.secret_data
+        [id, attr, *t] = item.secret_data
+        value = item.text()
+        if t:
+            [type] = t
+            value = type(value)
         with db.get_session() as session:
             sesh = session.query_first(db.Session, id=id)
-            setattr(sesh, attr, item.text())
+            setattr(sesh, attr, value)
 
     def rows_reordered(self):
         with db.get_session() as session:
@@ -1631,11 +1643,14 @@ class SessionEditorDialog(QDialog):
                 self.table.setItem(i, 1, cell(sesh.scramble_type, editable=True,
                         secret_data=(sesh.id, 'scramble_type')))
                 self.table.setItem(i, 2, cell(str(n_solves)))
+                self.table.setItem(i, 3, cell(str(sesh.notify_every_n_solves or ''),
+                        editable=True,
+                        secret_data=(sesh.id, 'notify_every_n_solves', int)))
                 for [j, stat] in enumerate(STAT_AO_COUNTS):
                     stat = stat_str(stat)
-                    self.table.setItem(i, 3+j,
+                    self.table.setItem(i, 4+j,
                             cell(ms_str(stats.get(stat))))
-                offset = 3 + len(STAT_AO_COUNTS)
+                offset = 4 + len(STAT_AO_COUNTS)
                 button = QPushButton('Merge...')
                 button.clicked.connect(functools.partial(self.merge_sessions, sesh.id))
                 self.table.setCellWidget(i, offset+0, button)

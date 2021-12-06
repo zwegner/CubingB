@@ -77,6 +77,7 @@ class Session(Base, NiceBase):
     sort_id = Column(Integer)
     name = Column(String(128))
     scramble_type = Column(String(64))
+    notify_every_n_solves = Column(Integer)
     cached_stats_current = Column(JSON)
     cached_stats_best = Column(JSON)
     cached_stats_best_solve_id = Column(JSON)
