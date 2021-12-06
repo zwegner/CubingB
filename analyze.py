@@ -824,9 +824,9 @@ class GraphDialog(QDialog):
             if self.type == 'date':
                 x = [d for [d, s] in solves]
 
-            # Count: solve number, but right aligned among all sessions
+            # Count: solve number
             elif self.type == 'count':
-                x = range(maxlen - len(solves), maxlen)
+                x = range(len(solves))
 
             # Adaptive: for every day that had solves, stretch all solves out
             # evenly throughout the day
