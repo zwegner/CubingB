@@ -1017,7 +1017,7 @@ class ScrambleViewWidget(QFrame):
 
     def set_scramble(self, scramble):
         cube = solver.Cube()
-        cube.run_alg(' '.join(scramble))
+        cube.run_alg(scramble)
 
         top_diag = render.gen_cube_diagram(cube)
         bottom_diag = render.gen_cube_diagram(cube.run_alg('x2 z'),
@@ -1282,11 +1282,15 @@ class SolveEditorDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
+        self.scramble_popup = ScrambleViewWidget(self)
+        self.scramble_popup.hide()
+
         self.session_label = QLabel()
         self.time_label = QLabel()
         self.result_label = QLabel()
         self.scramble_label = QLabel()
         self.scramble_label.setWordWrap(True)
+        self.scramble_label.linkHovered.connect(self.hover_scramble)
         self.notes = QPlainTextEdit()
         self.notes.textChanged.connect(lambda: self.make_edit('notes',
                 self.notes.toPlainText()))
@@ -1317,6 +1321,7 @@ class SolveEditorDialog(QDialog):
         self.session_selector = SessionSelectorDialog(self)
 
         self.solve_id = None
+        self.scramble = None
 
     def make_edit(self, key, value):
         with db.get_session() as session:
@@ -1345,12 +1350,19 @@ class SolveEditorDialog(QDialog):
         self.solve_id = solve_id
         with db.get_session() as session:
             solve = session.query_first(db.Solve, id=solve_id)
-            self.solve = solve
+            self.scramble = solve.scramble
+
             self.dnf.setChecked(solve.dnf)
             self.plus_2.setChecked(solve.plus_2)
             self.session_label.setText(solve.session.name)
             self.notes.setPlainText(solve.notes)
-            self.scramble_label.setText(solve.scramble)
+
+            # Create scramble as a big invisible link, so we can use the
+            # linkHovered event to show a diagram
+            scramble = ('<a style="color: #000; text-decoration: none;"'
+                    'href="#0">%s</a>' % solve.scramble)
+            self.scramble_label.setText(scramble)
+
             self.time_label.setText(str(solve.created_at))
             self.result_label.setText(solve_time_str(solve))
             # Show a playback button if there's smart data
@@ -1365,6 +1377,12 @@ class SolveEditorDialog(QDialog):
                 self.smart_widget = QLabel('None')
             self.layout.addWidget(self.smart_widget, 5, 1)
         self.update()
+
+    def hover_scramble(self, link):
+        if link:
+            self.scramble_popup.set_scramble(self.scramble)
+            text = ' '.join(self.scramble_popup.get_b64_pics(100, 10))
+            QToolTip.showText(QCursor.pos(), text)
 
     def delete_solve(self):
         response = QMessageBox.question(self, 'Confirm delete',

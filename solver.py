@@ -65,7 +65,7 @@ class Cube:
                 self.edges, self.corners)
 
     def run_alg(self, alg):
-        if isinstance(alg, str):
+        if isinstance(alg, (str, list)):
             alg = parse_alg(alg)
         for [rot, rn, r, n, r2, n2] in alg:
             if rot is not None:
@@ -208,6 +208,9 @@ def parse_rot(m):
     return 1
 
 def parse_alg(alg):
+    if isinstance(alg, list):
+        alg = ' '.join(alg)
+
     moves = []
 
     for move in alg.split():
