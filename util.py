@@ -20,7 +20,7 @@ import time
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
-        QTableWidgetItem, QHeaderView)
+        QTableWidgetItem, QHeaderView, QTabBar)
 
 # Global constants
 
@@ -119,6 +119,14 @@ def make_grid(parent, table, stretch=None, widths=None, margin=None):
         for [i, w] in enumerate(widths):
             layout.setColumnMinimumWidth(i, w)
     return layout
+
+def make_tabs(*tabs, change=None):
+    tab_bar = QTabBar()
+    for tab in tabs:
+        tab_bar.addTab(tab)
+    if change:
+        tab_bar.currentChanged.connect(change)
+    return tab_bar
 
 # Set the column headers for a table.
 # The hacky 'stretch' parameter will stretch all columns if it's negative, or a

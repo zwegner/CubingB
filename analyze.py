@@ -28,7 +28,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
 from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox,
         QWidget, QSizePolicy, QScrollArea, QTableWidget, QPushButton,
-        QTabBar, QCheckBox)
+        QCheckBox)
 from PyQt5.QtSvg import QSvgWidget
 
 import db
@@ -416,10 +416,7 @@ class AlgTable(QWidget):
         self.case_id = None
         self.f2l_slot = None
 
-        self.f2l_tabs = QTabBar()
-        for slot in F2L_SLOTS:
-            self.f2l_tabs.addTab(slot)
-        self.f2l_tabs.currentChanged.connect(self.change_f2l_tab)
+        self.f2l_tabs = make_tabs(*F2L_SLOTS, change=self.change_f2l_tab)
 
         self.alg_table = QTableWidget()
         set_table_columns(self.alg_table, ['Alg', 'Known?', 'Ignore'], stretch=0)

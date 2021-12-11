@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QOpenGLWidget,
         QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
         QComboBox, QDialog, QDialogButtonBox, QAbstractItemView, QFrame,
         QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog, QMenu,
-        QAction, QPlainTextEdit, QTabBar, QToolTip)
+        QAction, QPlainTextEdit, QToolTip)
 from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
         QRegion, QColor)
 from PyQt5.QtSvg import QSvgWidget
@@ -219,10 +219,8 @@ class CubeWindow(QMainWindow):
         main = QWidget()
 
         # Set up left
-        self.tab_bar = QTabBar()
-        for mode in ['Timer', 'Watch', 'Train', 'Algs']:
-            self.tab_bar.addTab(mode)
-        self.tab_bar.currentChanged.connect(self.change_tab)
+        self.tab_bar = make_tabs('Timer', 'Watch', 'Train', 'Algs',
+                change=self.change_tab)
 
         title = QLabel('CubingB')
         title.setStyleSheet('font: 48px; padding: 8px;')
