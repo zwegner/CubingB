@@ -17,10 +17,12 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
+import cProfile
 import enum
 import functools
 import gzip
 import os
+import pstats
 import random
 import struct
 import sys
@@ -1969,4 +1971,8 @@ if __name__ == '__main__':
     app.setWindowIcon(icon)
     window = CubeWindow()
     window.show()
-    sys.exit(app.exec_())
+    # Profile mode
+    if '-p' in sys.argv:
+        cProfile.run('app.exec_()', sort=pstats.SortKey.CUMULATIVE)
+    else:
+        sys.exit(app.exec_())
