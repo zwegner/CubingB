@@ -568,7 +568,10 @@ class CubeWindow(QMainWindow):
     # data to a new object so it can pick up a consistent view at its leisure
     def mark_changed(self, playback=False):
         # Ignore smart cube events during a playback
-        if self.mode == Mode.PLAYBACK and not playback:
+        if self.mode == Mode.PLAYBACK:
+            if not playback:
+                return
+        elif self.mode != Mode.TIMER:
             return
 
         # XXX copy only the stuff that's modified in place. Don't introduce
