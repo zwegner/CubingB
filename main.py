@@ -239,13 +239,14 @@ class CubeWindow(QMainWindow):
         top.setObjectName('top')
         make_grid(top, [[self.instruction_widget, self.smart_playback_widget,
                 self.scramble_widget]], margin=0)
+        self.top = top
 
         # Create an overlapping widget thingy so the scramble is above the timer
         timer_container = QWidget(main)
-        timer_layout = QGridLayout(timer_container)
-        timer_layout.addWidget(self.timer_widget, 0, 0)
+        timer_layout = make_grid(timer_container, [[self.timer_widget]], margin=0)
         timer_layout.addWidget(self.scramble_view_widget, 0, 0,
                 Qt.AlignRight | Qt.AlignTop)
+        self.timer_container = timer_container
 
         right = QWidget()
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -395,11 +396,15 @@ class CubeWindow(QMainWindow):
         self.timer_widget.hide()
         self.alg_trainer_widget.hide()
         self.alg_viewer_widget.hide()
+        self.top.hide()
+        self.timer_container.hide()
 
         self.timer_widget.set_pending(False)
 
         # Timer mode: main scrambling/solving interface
         if self.mode == Mode.TIMER:
+            self.top.show()
+            self.timer_container.show()
             if self.state == State.SCRAMBLE:
                 self.scramble_widget.show()
                 self.scramble_view_widget.show()
@@ -421,6 +426,7 @@ class CubeWindow(QMainWindow):
                 self.start_solve_ui()
         # Playback mode
         elif self.mode == Mode.PLAYBACK:
+            self.top.show()
             self.smart_playback_widget.show()
             self.gl_widget.show()
         # Alg Training mode
