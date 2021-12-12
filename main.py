@@ -361,17 +361,18 @@ class CubeWindow(QMainWindow):
         self.update_state_ui()
 
     def keyReleaseEvent(self, event):
-        if event.key() == Qt.Key.Key_Space and self.state == State.SOLVE_PENDING:
-            if time.time() - self.pending_start > TIMER_DEBOUNCE:
-                self.state = State.SOLVING
-                self.start_solve()
-                self.start_solve_ui()
-            else:
-                self.state = State.SCRAMBLE
-                self.stop_pending(False)
-            self.update_state_ui()
-        else:
-            event.ignore()
+        if event.key() == Qt.Key.Key_Space:
+            if self.mode == Mode.ALG_TRAIN:
+                self.alg_trainer_widget.reset()
+            elif self.state == State.SOLVE_PENDING:
+                if time.time() - self.pending_start > TIMER_DEBOUNCE:
+                    self.state = State.SOLVING
+                    self.start_solve()
+                    self.start_solve_ui()
+                else:
+                    self.state = State.SCRAMBLE
+                    self.stop_pending(False)
+                self.update_state_ui()
 
     def send_notification(self, text):
         self.status_widget.update_status(text)
@@ -580,16 +581,16 @@ class CubeWindow(QMainWindow):
 
     # Make a move and update any state for either a scramble or a solve
     def make_turn(self, face, turn):
-        alg = solver.move_str(face, turn)
-        self.cube.run_alg(alg)
-        old_state = self.state
-
         # Alg training mode: just let the trainer handle all the logic
         if self.mode == Mode.ALG_TRAIN:
             self.alg_trainer_widget.make_move(face, turn)
             return
 
         assert self.mode == Mode.TIMER
+
+        alg = solver.move_str(face, turn)
+        self.cube.run_alg(alg)
+        old_state = self.state
 
         # Scrambling: see if this is the next move of the scramble
         if self.state == State.SMART_SCRAMBLING:

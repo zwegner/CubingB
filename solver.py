@@ -87,6 +87,53 @@ class Cube:
 
 SOLVED_CUBE = Cube()
 
+# Create CFOP tables the lazy way
+
+CROSS_EDGES = {c: [] for c in range(6)}
+for color in range(6):
+    for i in range(12):
+        for j in range(2):
+            if SOLVED_CUBE.edges[i][j] == color:
+                CROSS_EDGES[color].append((i, j))
+
+F2L_PAIRS = {c: [] for c in range(6)}
+for color in range(6):
+    for [i, corner] in enumerate(SOLVED_CUBE.corners):
+        if color in corner:
+            match = tuple(c for c in corner if c != color)
+            xm = match[::-1]
+            if match in SOLVED_CUBE.edges:
+                j = SOLVED_CUBE.edges.index(match)
+            else:
+                j = SOLVED_CUBE.edges.index(xm)
+            F2L_PAIRS[color].append((i, j))
+
+OLL_CORNERS = {c: [] for c in range(6)}
+OLL_EDGES = {c: [] for c in range(6)}
+for color in range(6):
+    for i in range(8):
+        for j in range(3):
+            if SOLVED_CUBE.corners[i][j] == color ^ 1:
+                OLL_CORNERS[color].append((i, j))
+    for i in range(12):
+        for j in range(2):
+            if SOLVED_CUBE.edges[i][j] == color ^ 1:
+                OLL_EDGES[color].append((i, j))
+
+def is_cross_solved(cube, cross_color):
+    return all(cube.edges[i][j] == SOLVED_CUBE.edges[i][j]
+            for [i, j] in CROSS_EDGES[cross_color])
+
+def is_f2l_solved(cube, cross_color):
+    return all(cube.corners[c] == SOLVED_CUBE.corners[c] and
+                            cube.edges[e] == SOLVED_CUBE.edges[e]
+                for [c, e] in F2L_PAIRS[cross_color])
+
+def is_oll_solved(cube, cross_color):
+    ll = cross_color ^ 1
+    return (all(cube.corners[i][j] == ll for [i, j] in OLL_CORNERS[cross_color]) and
+            all(cube.edges[i][j] == ll for [i, j] in OLL_EDGES[cross_color]))
+
 # Metabrogramming. Generate function for each of the turn and rotate moves.
 # This is pretty messy code, just the first random crap I hacked up that worked
 TURNS = []
@@ -205,6 +252,9 @@ def parse_rot(m):
         return 3
     elif m.endswith('2'):
         return 2
+    # E.g. a Ub perm alg has R3 in it
+    elif m.endswith('3'):
+        return 3
     return 1
 
 def parse_alg(alg):
@@ -246,8 +296,44 @@ def parse_alg(alg):
         moves.append((rot, rn, face, n, f2, n2))
     return moves
 
-def invert_alg(alg):
+# Parse all the rotation moves in an alg, including slice/wide moves (which
+# change the orientation of centers), and return a list of just the
+# rotations. For example, M2 y U f -> x2 y z
+def get_alg_rotations(alg):
     moves = []
+    for move in alg.split():
+        rot = rn = None
+        if move[0].islower() and move[0].upper() in FACE_STR:
+            face = FACE_STR.index(move[0].upper())
+            rot = face >> 1
+            rn = parse_rot(move)
+            if face & 1:
+                rn = 4 - rn
+
+        elif move[0] in ROTATE_STR:
+            rot = ROTATE_STR.index(move[0])
+            rn = parse_rot(move)
+
+        elif move[0] in SLICE_STR:
+            rot = SLICE_STR.index(move[0])
+            rn = parse_rot(move)
+            if SLICE_ROT_FLIP[rot]:
+                rn = 4 - rn
+
+        if rot is not None:
+            moves.append(ROTATE_STR[rot] + TURN_STR[rn])
+    return moves
+
+def invert_alg(alg, cancel_rotations=False):
+    moves = []
+
+    # If we're cancelling rotations, we pull out all the rotations in the given
+    # alg apply them at the beginning. Since all the other moves are getting
+    # inverted, these cancel out, so the cube will start and end in the same
+    # orientation.
+    if cancel_rotations:
+        moves = get_alg_rotations(alg)
+
     for m in reversed(alg.split()):
         turn = parse_rot(m[1:])
         moves.append(m[0] + TURN_STR[4 - turn])

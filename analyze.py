@@ -16,10 +16,12 @@
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
 import collections
+import enum
 import functools
 import gzip
 import itertools
 import math
+import random
 import re
 import struct
 import time
@@ -40,6 +42,9 @@ from util import *
 STAT_OUTLIER_PCT = 5
 
 F2L_SLOTS = ['Front Right', 'Front Left', 'Back Left', 'Back Right']
+
+TrainMode = enum.IntEnum('TrainMode', 'RECOGNIZE DRILL', start=0)
+AlgSet = enum.IntEnum('AlgSet', 'F2L OLL PLL', start=0)
 
 def calc_ao(all_times, start, size):
     if len(all_times) - start < size:
@@ -564,6 +569,16 @@ class AlgTrainer(QWidget):
         super().__init__(parent)
         self.initialized = False
         self.recent_algs = []
+        self.mode = TrainMode.RECOGNIZE
+        self.alg_set = AlgSet.OLL
+        self.cube_diag = None
+        self.status = ''
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.schedule_fn.connect(self.run_scheduled_fn, type=Qt.QueuedConnection)
+
+    def run_scheduled_fn(self, fn):
+        fn()
 
     def init(self):
         if self.initialized:
@@ -571,26 +586,68 @@ class AlgTrainer(QWidget):
         self.initialized = True
 
         title = QLabel('Alg Trainer')
-        title.setStyleSheet('font: 24px;')
+        title.setStyleSheet('font: 24px; padding: 10px')
+        title.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        # Make top option bar
+        self.mode_tabs = make_tabs('Recognize', 'Drill', change=self.change_mode)
+        self.alg_set_tabs = make_tabs(*AlgSet.__members__,
+                change=self.change_alg_set)
+        top = QWidget(self)
+        make_hbox(top, [self.mode_tabs, self.alg_set_tabs])
+
+        # Make view for recognition mode
+        self.recog_view = QWidget(self)
+        self.cube_view = QSvgWidget()
+        self.cube_view.setFixedSize(200, 200)
+        self.recog_status = QLabel()
+        title.setStyleSheet('font: 18px;')
+        make_vbox(self.recog_view, [self.recog_status, self.cube_view])
+
+        # Make view for drill mode
+        self.drill_view = QWidget(self)
         self.current = QLabel()
         self.current.setWordWrap(True)
-
-        recents = QWidget(self)
+        recents = QWidget()
         recents.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.recent = [[QLabel(), QLabel(), QSvgWidget()]
                 for y in range(N_RECENT_ALGS)]
         make_grid(recents, self.recent)
+        make_vbox(self.drill_view, [self.current, recents])
 
-        make_vbox(self, [title, self.current, recents])
+        make_vbox(self, [title, top, self.recog_view,
+                self.drill_view], margin=0)
+
+        # Collect all the alg cases for training
+        self.alg_cases = collections.defaultdict(list)
+        with db.get_session() as session:
+            for case in session.query_all(db.AlgCase):
+                if case.alg_set in AlgSet.__members__:
+                    alg_set = AlgSet.__members__[case.alg_set]
+                    self.alg_cases[alg_set].append((case.alg_nb, case.algs[0].moves))
 
         self.reset()
 
-        self.schedule_fn.connect(self.run_scheduled_fn, type=Qt.QueuedConnection)
-
         self.build_regex()
 
-    def run_scheduled_fn(self, fn):
-        fn()
+    def change_mode(self, tab):
+        self.mode = TrainMode(tab)
+        if self.mode == TrainMode.RECOGNIZE:
+            self.alg_set_tabs.show()
+        else:
+            self.alg_set_tabs.hide()
+        self.render()
+
+    def change_alg_set(self, tab):
+        alg_set = AlgSet(tab)
+        if alg_set != self.alg_set:
+            self.alg_set = alg_set
+            self.reset()
+
+    def resizeEvent(self, event):
+        size = event.size()
+        size = max(0, min(size.width(), size.height() - 100) - 100)
+        self.cube_view.setFixedSize(size, size)
 
     # Build a regex of all the algs in the db. I had started to build a trie to
     # match the current moves to a list of known algorithms, and seeing the
@@ -687,13 +744,65 @@ class AlgTrainer(QWidget):
 
         self.matcher = re.compile('|'.join(regs))
 
+    def run_inverse_alg(self, moves):
+        # Add random pre/post AUF
+        AUFS = ['', 'U', 'U2', "U'"]
+        moves = '%s %s %s' % (random.choice(AUFS), moves,
+                random.choice(AUFS))
+
+        # Invert moves
+        moves = solver.invert_alg(moves, cancel_rotations=True)
+
+        # Run the inverse algorithm on the cube
+        self.cube.run_alg(moves)
+
     def reset(self):
         self.current_moves = []
         self.move_times = []
         self.last_face = None
         self.last_turn = None
-        self.schedule_fn.emit(self.render_current)
-        self.schedule_fn.emit(self.render_recent)
+
+        if self.mode == TrainMode.RECOGNIZE:
+            self.cube = solver.Cube()
+            self.cross_color = solver.Y
+
+            # Choose a random case. We pick random cases for each alg set
+            # later in the CFOP solve, and invert those first, so as to scramble
+            # all the pieces. (e.g. for a random F2L case, we go from a solved cube,
+            # do an inverse PLL, inverse OLL, then an inverted F2L alg)
+
+            # Choose a random PLL
+            [case, alg] = random.choice(self.alg_cases[AlgSet.PLL])
+            self.run_inverse_alg(alg)
+            if self.alg_set <= AlgSet.OLL:
+                # Choose a random OLL
+                [case, alg] = random.choice(self.alg_cases[AlgSet.OLL])
+                self.run_inverse_alg(alg)
+                # Choose a random FLL
+                if self.alg_set == AlgSet.F2L:
+                    [case, alg] = random.choice(self.alg_cases[AlgSet.F2L])
+                    self.run_inverse_alg(alg)
+
+            # Generate diagram
+            self.cube_diag = render.gen_cube_diagram(self.cube)
+
+        self.schedule_fn.emit(self.render)
+
+    def render(self):
+        if self.mode == TrainMode.RECOGNIZE:
+            self.recog_view.show()
+            self.drill_view.hide()
+            self.cube_view.load(self.cube_diag.encode('ascii'))
+            self.recog_status.setText(self.status)
+        elif self.mode == TrainMode.DRILL:
+            self.recog_view.hide()
+            self.drill_view.show()
+
+            self.render_current()
+            self.render_recent()
+        else:
+            assert False
+        self.update()
 
     def render_current(self):
         self.current.setText(' '.join(self.current_moves))
@@ -728,30 +837,57 @@ class AlgTrainer(QWidget):
             self.current_moves.append(solver.move_str(face, turn))
             self.move_times.append(time.time())
 
-        move_str = ' '.join(self.current_moves)
-        match = self.matcher.search(move_str)
-        done = False
-        if match:
-            alg_id = match.lastgroup
-            moves = match.group(alg_id)
-            with db.get_session() as session:
-                alg = session.query_first(db.Algorithm, id=int(alg_id[1:]))
-                assert len(self.move_times) == len(self.current_moves)
-                start = self.move_times[-len(moves.split())]
-                t = time.time() - start
-                a = '%s - %s' % (alg.case.alg_set, alg.case.alg_nb)
+        # Recognize mode: update internal cube, see if it's solved
+        if self.mode == TrainMode.RECOGNIZE:
+            alg = solver.move_str(face, turn)
+            self.cube.run_alg(alg)
+            # Check for the cube being partially solved based on which
+            # alg set we're using (e.g. only first two layers are solved in
+            # an F2L alg)
+            solved = False
+            if (solver.is_cross_solved(self.cube, self.cross_color) and
+                    solver.is_f2l_solved(self.cube, self.cross_color)):
+                if self.alg_set == AlgSet.F2L:
+                    solved = True
+                elif solver.is_oll_solved(self.cube, self.cross_color):
+                    if self.alg_set == AlgSet.OLL:
+                        solved = True
+                    elif self.cube == solver.SOLVED_CUBE:
+                        solved = True
 
-                # Generate diagram (should cache this or something)
-                diag = render.gen_cube_diagram(alg.case.diagram,
-                        type=alg.case.diag_type)
+            if solved:
+                self.status = 'Nice!'
+                self.reset()
+            else:
+                if self.status != '':
+                    self.status = ''
+                    self.schedule_fn.emit(self.render)
 
-                self.recent_algs.insert(0, (t, a, diag))
-                self.recent_algs = self.recent_algs[:N_RECENT_ALGS]
+        elif self.mode == TrainMode.DRILL:
+            # Check for a completed alg
+            move_str = ' '.join(self.current_moves)
+            match = self.matcher.search(move_str)
+            done = False
+            if match:
+                alg_id = match.lastgroup
+                moves = match.group(alg_id)
+                with db.get_session() as session:
+                    alg = session.query_first(db.Algorithm, id=int(alg_id[1:]))
+                    assert len(self.move_times) == len(self.current_moves)
+                    start = self.move_times[-len(moves.split())]
+                    t = time.time() - start
+                    a = '%s - %s' % (alg.case.alg_set, alg.case.alg_nb)
 
-            # Reset will also render
-            self.reset()
-        else:
-            self.render_current()
+                    # Generate diagram (should cache this or something)
+                    diag = render.gen_cube_diagram(alg.case.diagram,
+                            type=alg.case.diag_type)
+
+                    self.recent_algs.insert(0, (t, a, diag))
+                    self.recent_algs = self.recent_algs[:N_RECENT_ALGS]
+
+                self.reset()
+            else:
+                self.render_current()
 
 GRAPH_TYPES = ['adaptive', 'date', 'count']
 
