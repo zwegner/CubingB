@@ -46,6 +46,11 @@ F2L_SLOTS = ['Front Right', 'Front Left', 'Back Left', 'Back Right']
 TrainMode = enum.IntEnum('TrainMode', 'RECOGNIZE DRILL', start=0)
 AlgSet = enum.IntEnum('AlgSet', 'F2L OLL PLL', start=0)
 
+# Normal cube colors to autodetect in session names. White is intentionally
+# left out since the graphs are on white backgrounds
+COLORS = ['yellow', 'red', 'orange', 'green', 'blue']
+OTHER_COLORS = ['black', 'grey', 'brown', 'purple', 'cyan', 'magenta']
+
 def calc_ao(all_times, start, size):
     if len(all_times) - start < size:
         mean = None
@@ -1038,9 +1043,22 @@ class GraphDialog(QDialog):
 
         self.lines = {}
         self.index_map = {}
+        color_index = 0
 
         # Create plot for each session's solves
         for [name, solves] in self.solve_sets.items():
+            # Autodetect colors from the session name
+            color = None
+            for c in COLORS:
+                if c in name:
+                    color = c
+                    break
+            # Otherwise, choose a neutral color
+            else:
+                if color_index < len(OTHER_COLORS):
+                    color = OTHER_COLORS[color_index]
+                    color_index += 1
+
             # Create x series based on graph type
 
             # Date: just use the solve time
@@ -1088,9 +1106,10 @@ class GraphDialog(QDialog):
 
                 self.index_map[name] = indices
                 [line] = self.plot.step(new_x, new_y, label=name, where='post',
-                        markersize=4)
+                        color=color)
             else:
-                [line] = self.plot.plot(x, y, '.', label=name, markersize=1)
+                [line] = self.plot.plot(x, y, '.', label=name, markersize=1,
+                        color=color)
 
             self.lines[name] = line
 
