@@ -926,6 +926,10 @@ class GraphDialog(QDialog):
         self.type = 'adaptive'
         self.stat = 'ao100'
 
+        self.plot = None
+        self.line = None
+        self.tooltip = None
+
         make_grid(self, [
             [None, None, self.title, select_label, self.selector],
             [self.canvas],
@@ -937,11 +941,41 @@ class GraphDialog(QDialog):
         self.render()
 
     def update_data(self, solve_sets, stat='single'):
+        self.init()
+
         self.stat = stat
-        self.solve_sets = {name: [(s.created_at, s.cached_stats) for s in ss]
+        self.solve_sets = {name: [(i+1, s.created_at, s.cached_stats)
+                for [i, s] in enumerate(ss)]
                 for [name, ss] in solve_sets.items()}
 
         self.render()
+
+    def hover(self, event):
+        for [name, solves] in self.solve_sets.items():
+            line = self.lines[name]
+
+            [contained, indices] = line.contains(event)
+            if contained:
+                # Get first point that contains cursor and set tooltip there
+                i = indices['ind'][0]
+                [x, y] = line.get_data()
+                self.tooltip.xy = [x[i], y[i]]
+
+                # Show some neat data there
+                [i, d, s] = solves[i]
+                t = s[self.stat]
+                self.tooltip.set_text('%s, %s\nSolve %s: %s' % (name,
+                        d, i, ms_str(t)))
+
+                self.tooltip.set_visible(True)
+                self.figure.canvas.draw_idle()
+                break
+        # No hovered point: hide tooltip if it's visible
+        # Too bad Python doesn't have for..elif syntax
+        else:
+            if self.tooltip.get_visible():
+                self.tooltip.set_visible(False)
+                self.figure.canvas.draw_idle()
 
     def render(self):
         self.init()
@@ -953,16 +987,25 @@ class GraphDialog(QDialog):
             self.title.setText('%s sessions: %s' % (len(self.solve_sets), self.stat))
 
         self.figure.clear()
-        plot = self.figure.add_subplot()
+        self.plot = self.figure.add_subplot()
+
+        # Set up tooltip, to be activated in the hover handler
+        self.tooltip = self.plot.annotate('', xy=(0, 0), xytext=(20, 10),
+                textcoords='offset points', bbox={'boxstyle': 'round', 'fc': 'w'})
+        self.tooltip.set_visible(False)
+        self.tooltip.set_wrap(True)
+        self.figure.canvas.mpl_connect('motion_notify_event', self.hover)
 
         # Preprocessing for different graph types
         if self.type == 'count':
             maxlen = max(len(s) for s in self.solve_sets.values())
         elif self.type == 'adaptive':
             solves_per_day = collections.Counter(d.date()
-                for [name, solves] in self.solve_sets.items() for [d, s] in solves)
+                for [name, solves] in self.solve_sets.items() for [i, d, s] in solves)
             day_ordinal = {d: i for [i, d] in enumerate(sorted(solves_per_day))}
             first_day = min(solves_per_day)
+
+        self.lines = {}
 
         # Create plot for each session's solves
         for [name, solves] in self.solve_sets.items():
@@ -970,7 +1013,7 @@ class GraphDialog(QDialog):
 
             # Date: just use the solve time
             if self.type == 'date':
-                x = [d for [d, s] in solves]
+                x = [d for [i, d, s] in solves]
 
             # Count: solve number
             elif self.type == 'count':
@@ -980,12 +1023,12 @@ class GraphDialog(QDialog):
             # evenly throughout the day
             elif self.type == 'adaptive':
                 sesh_solves_per_day = collections.Counter(d.date()
-                        for [d, s] in solves)
+                        for [i, d, s] in solves)
 
                 x = []
                 last_day = None
                 dc = 0
-                for [d, s] in solves:
+                for [i, d, s] in solves:
                     d = d.date()
                     if last_day and d > last_day:
                         dc = 0
@@ -996,9 +1039,10 @@ class GraphDialog(QDialog):
 
             # Create y series from the given stat
             y = [s[self.stat] / 1000 if s[self.stat] else None
-                    for [d, s] in solves]
+                    for [i, d, s] in solves]
 
-            plot.plot(x, y, '.', label=name, markersize=1)
+            [line] = self.plot.plot(x, y, '.', label=name, markersize=1)
+            self.lines[name] = line
 
-        plot.legend(loc='upper right')
+        self.plot.legend(loc='upper right')
         self.canvas.draw()
