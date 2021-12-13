@@ -1327,7 +1327,7 @@ class SolveEditorDialog(QDialog):
             # Create scramble as a big invisible link, so we can use the
             # linkHovered event to show a diagram
             scramble = ('<a style="color: #000; text-decoration: none;"'
-                    'href="#0">%s</a>' % solve.scramble)
+                    'href="{s}">{s}</a>'.format(s=solve.scramble))
             self.scramble_label.setText(scramble)
 
             self.time_label.setText(str(solve.created_at))
