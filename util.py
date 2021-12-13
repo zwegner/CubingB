@@ -146,3 +146,9 @@ def set_table_columns(table, cols, stretch=None, visible=True):
             table.horizontalHeader().setSectionResizeMode(stretch, QHeaderView.Stretch)
         else:
             table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
+@contextlib.contextmanager
+def block_signals(obj):
+    obj.blockSignals(True)
+    yield
+    obj.blockSignals(False)

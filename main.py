@@ -1143,20 +1143,17 @@ class SessionWidget(QWidget):
             sesh = session.query_first(db.Settings).current_session
 
             # Block signal handler so we don't trigger a recursive update
-            self.selector.blockSignals(True)
-
-            # Set up dropdown
-            self.selector.clear()
-            self.session_ids = []
-            sessions = session.query_all(db.Session)
-            sessions = sorted(sessions, key=session_sort_key)
-            for s in sessions:
-                self.session_ids.append(s.id)
-                self.selector.addItem(s.name)
-                if s.id == sesh.id:
-                    self.selector.setCurrentIndex(len(self.session_ids) - 1)
-
-            self.selector.blockSignals(False)
+            with block_signals(self.selector):
+                # Set up dropdown
+                self.selector.clear()
+                self.session_ids = []
+                sessions = session.query_all(db.Session)
+                sessions = sorted(sessions, key=session_sort_key)
+                for s in sessions:
+                    self.session_ids.append(s.id)
+                    self.selector.addItem(s.name)
+                    if s.id == sesh.id:
+                        self.selector.setCurrentIndex(len(self.session_ids) - 1)
 
             # Get solves
             solves = analyze.get_session_solves(session, sesh)
@@ -1446,24 +1443,21 @@ class ReorderTableWidget(QTableWidget):
                     for row in rows]
 
             # Disconnect signals so we don't get spurious edit signals
-            self.blockSignals(True)
+            with block_signals(self):
+                # Remove the old rows
+                for row in reversed(rows):
+                    self.removeRow(row)
+                    if row < drop_row:
+                        drop_row -= 1
 
-            # Remove the old rows
-            for row in reversed(rows):
-                self.removeRow(row)
-                if row < drop_row:
-                    drop_row -= 1
-
-            # Re-insert old items and select them
-            for [row_idx, [row, header]] in enumerate(zip(rows_to_move, headers)):
-                row_idx += drop_row
-                self.insertRow(row_idx)
-                self.setVerticalHeaderItem(row_idx, header)
-                for [column, cell] in enumerate(row):
-                    self.setItem(row_idx, column, cell)
-                    self.item(row_idx, column).setSelected(True)
-
-            self.blockSignals(False)
+                # Re-insert old items and select them
+                for [row_idx, [row, header]] in enumerate(zip(rows_to_move, headers)):
+                    row_idx += drop_row
+                    self.insertRow(row_idx)
+                    self.setVerticalHeaderItem(row_idx, header)
+                    for [column, cell] in enumerate(row):
+                        self.setItem(row_idx, column, cell)
+                        self.item(row_idx, column).setSelected(True)
 
             # Notify parent of reordering
             self.reorder_cb()
@@ -1589,48 +1583,45 @@ class SessionEditorDialog(QDialog):
 
     def update_items(self):
         # Disconnect signals so we don't get spurious edit signals
-        self.table.blockSignals(True)
+        with block_signals(self.table):
+            self.table.clearContents()
+            self.table.setRowCount(0)
+            with db.get_session() as session:
+                # Get all sessions along with their number of solves. Kinda tricky.
+                # We could do len(sesh.solves), but that's real slow
+                stmt = (session.query(db.Solve.session_id,
+                        db.sa.func.count('*').label('n_solves'))
+                        .group_by(db.Solve.session_id).subquery())
+                sessions = (session.query(db.Session, stmt.c.n_solves)
+                        .outerjoin(stmt, db.Session.id == stmt.c.session_id).all())
+                sessions = list(sorted(sessions, key=lambda s: session_sort_key(s[0])))
 
-        self.table.clearContents()
-        self.table.setRowCount(0)
-        with db.get_session() as session:
-            # Get all sessions along with their number of solves. Kinda tricky.
-            # We could do len(sesh.solves), but that's real slow
-            stmt = (session.query(db.Solve.session_id,
-                    db.sa.func.count('*').label('n_solves'))
-                    .group_by(db.Solve.session_id).subquery())
-            sessions = (session.query(db.Session, stmt.c.n_solves)
-                    .outerjoin(stmt, db.Session.id == stmt.c.session_id).all())
-            sessions = list(sorted(sessions, key=lambda s: session_sort_key(s[0])))
+                self.table.setRowCount(len(sessions))
+                for [i, [sesh, n_solves]] in enumerate(sessions):
+                    # Calculate stats if there's no cache
+                    if sesh.cached_stats_best is None:
+                        solves = analyze.get_session_solves(session, sesh)
+                        analyze.calc_session_stats(sesh, solves)
 
-            self.table.setRowCount(len(sessions))
-            for [i, [sesh, n_solves]] in enumerate(sessions):
-                # Calculate stats if there's no cache
-                if sesh.cached_stats_best is None:
-                    solves = analyze.get_session_solves(session, sesh)
-                    analyze.calc_session_stats(sesh, solves)
-
-                stats = sesh.cached_stats_best or {}
-                sesh_id = session_sort_key(sesh)
-                self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
-                self.table.setItem(i, 0, cell(sesh.name, editable=True,
-                        secret_data=(sesh.id, 'name')))
-                self.table.setItem(i, 1, cell(sesh.scramble_type, editable=True,
-                        secret_data=(sesh.id, 'scramble_type')))
-                self.table.setItem(i, 2, cell(str(n_solves)))
-                self.table.setItem(i, 3, cell(str(sesh.notify_every_n_solves or ''),
-                        editable=True,
-                        secret_data=(sesh.id, 'notify_every_n_solves', int)))
-                for [j, stat] in enumerate(STAT_AO_COUNTS):
-                    stat = stat_str(stat)
-                    self.table.setItem(i, 4+j,
-                            cell(ms_str(stats.get(stat))))
-                offset = 4 + len(STAT_AO_COUNTS)
-                button = QPushButton('Merge...')
-                button.clicked.connect(functools.partial(self.merge_sessions, sesh.id))
-                self.table.setCellWidget(i, offset+0, button)
-
-        self.table.blockSignals(False)
+                    stats = sesh.cached_stats_best or {}
+                    sesh_id = session_sort_key(sesh)
+                    self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
+                    self.table.setItem(i, 0, cell(sesh.name, editable=True,
+                            secret_data=(sesh.id, 'name')))
+                    self.table.setItem(i, 1, cell(sesh.scramble_type, editable=True,
+                            secret_data=(sesh.id, 'scramble_type')))
+                    self.table.setItem(i, 2, cell(str(n_solves)))
+                    self.table.setItem(i, 3, cell(str(sesh.notify_every_n_solves or ''),
+                            editable=True,
+                            secret_data=(sesh.id, 'notify_every_n_solves', int)))
+                    for [j, stat] in enumerate(STAT_AO_COUNTS):
+                        stat = stat_str(stat)
+                        self.table.setItem(i, 4+j,
+                                cell(ms_str(stats.get(stat))))
+                    offset = 4 + len(STAT_AO_COUNTS)
+                    button = QPushButton('Merge...')
+                    button.clicked.connect(functools.partial(self.merge_sessions, sesh.id))
+                    self.table.setCellWidget(i, offset+0, button)
 
         self.table.resizeColumnsToContents()
 
@@ -1729,9 +1720,8 @@ class SmartPlaybackWidget(QWidget):
 
         self.parent.playback_events.emit(events)
 
-        self.slider.blockSignals(True)
-        self.slider.setValue(self.event_idx)
-        self.slider.blockSignals(False)
+        with block_signals(self.slider):
+            self.slider.setValue(self.event_idx)
 
         self.current_time_label.setText(ms_str(ts))
 
@@ -1751,9 +1741,8 @@ class SmartPlaybackWidget(QWidget):
         if self.solve is None:
             return
         # In case this came from start/end buttons, set the slider to new position
-        self.slider.blockSignals(True)
-        self.slider.setValue(event_idx)
-        self.slider.blockSignals(False)
+        with block_signals(self.slider):
+            self.slider.setValue(event_idx)
 
         # Search for the last cube state before this event ("keyframe"), then
         # play forward from there til the index
@@ -1780,9 +1769,8 @@ class SmartPlaybackWidget(QWidget):
         self.events = solve.events
         self.title.setText('Solve %s (%s)' % (solve.solve_nb, solve.session_name))
 
-        self.slider.blockSignals(True)
-        self.slider.setValue(0)
-        self.slider.blockSignals(False)
+        with block_signals(self.slider):
+            self.slider.setValue(0)
         self.slider.setMaximum(len(self.events) - 1)
 
         self.current_time_label.setText(ms_str(0))
