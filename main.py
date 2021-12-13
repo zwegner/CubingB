@@ -1186,7 +1186,7 @@ class SessionWidget(QWidget):
                     graph_button = QPushButton(graph_icon, '')
                     graph_button.setStyleSheet('border: none;')
                     graph_button.clicked.connect(
-                            functools.partial(self.show_graph, stat))
+                            functools.partial(self.show_graph, size))
                     mean = sesh.cached_stats_current[stat]
                     best = sesh.cached_stats_best[stat]
                     stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
@@ -1491,7 +1491,7 @@ class SessionEditorDialog(QDialog):
         for s in STAT_AO_COUNTS:
             stat = stat_str(s)
             action = QAction('Graph %s' % stat, self)
-            action.triggered.connect(functools.partial(self.graph_selection, stat))
+            action.triggered.connect(functools.partial(self.graph_selection, s))
             self.ctx_menu.addAction(action)
 
         self.table = ReorderTableWidget(self, self.rows_reordered)

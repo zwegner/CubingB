@@ -910,12 +910,23 @@ class GraphDialog(QDialog):
         self.title = QLabel()
         self.title.setStyleSheet('font: 24px')
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         select_label = QLabel('Graph Type:')
         self.selector = QComboBox()
         for t in GRAPH_TYPES:
             self.selector.addItem(t)
         self.selector.currentIndexChanged.connect(self.change_type)
+
+        stat_label = QLabel('Stat:')
+        self.stat_selector = QComboBox()
+        for s in STAT_AO_COUNTS:
+            self.stat_selector.addItem(stat_str(s))
+        self.stat_selector.currentIndexChanged.connect(self.change_stat)
+
+        record_cb = QCheckBox('Only records')
+        record_cb.setChecked(False)
+        record_cb.stateChanged.connect(self.change_record)
 
         self.figure = Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
@@ -928,22 +939,38 @@ class GraphDialog(QDialog):
 
         self.plot = None
         self.line = None
+        self.index_map = None
         self.tooltip = None
+        self.record = False
 
         make_grid(self, [
-            [None, None, self.title, select_label, self.selector],
+            [self.title],
+            [record_cb, None, stat_label, self.stat_selector, None,
+                    select_label, self.selector],
             [self.canvas],
             [buttons],
-        ], stretch=[0, 0, 1, 0, 0])
+        ], stretch=[0, 1, 0, 0, 1, 0, 0])
+
+    def change_record(self, value):
+        self.record = bool(value)
+        self.render()
+
+    def change_stat(self):
+        self.stat = stat_str(STAT_AO_COUNTS[self.stat_selector.currentIndex()])
+        self.render()
 
     def change_type(self):
         self.type = GRAPH_TYPES[self.selector.currentIndex()]
         self.render()
 
-    def update_data(self, solve_sets, stat='single'):
+    def update_data(self, solve_sets, stat=1):
         self.init()
 
-        self.stat = stat
+        self.stat = stat_str(stat)
+
+        with block_signals(self.stat_selector):
+            self.stat_selector.setCurrentIndex(STAT_AO_COUNTS.index(stat))
+
         self.solve_sets = {name: [(i+1, s.created_at, s.cached_stats)
                 for [i, s] in enumerate(ss)]
                 for [name, ss] in solve_sets.items()}
@@ -960,6 +987,10 @@ class GraphDialog(QDialog):
                 i = indices['ind'][0]
                 [x, y] = line.get_data()
                 self.tooltip.xy = [x[i], y[i]]
+
+                # Remap index if we're not showing all solves
+                if name in self.index_map:
+                    i = self.index_map[name][i]
 
                 # Show some neat data there
                 [i, d, s] = solves[i]
@@ -1006,6 +1037,7 @@ class GraphDialog(QDialog):
             first_day = min(solves_per_day)
 
         self.lines = {}
+        self.index_map = {}
 
         # Create plot for each session's solves
         for [name, solves] in self.solve_sets.items():
@@ -1041,7 +1073,25 @@ class GraphDialog(QDialog):
             y = [s[self.stat] / 1000 if s[self.stat] else None
                     for [i, d, s] in solves]
 
-            [line] = self.plot.plot(x, y, '.', label=name, markersize=1)
+            # Record mode: only show the best stat up to a given point
+            if self.record:
+                best = 1e100
+                indices = []
+                new_x = []
+                new_y = []
+                for [i, [xx, yy]] in enumerate(zip(x, y)):
+                    if yy and yy < best:
+                        indices.append(i)
+                        best = yy
+                        new_x.append(xx)
+                        new_y.append(yy)
+
+                self.index_map[name] = indices
+                [line] = self.plot.step(new_x, new_y, label=name, where='post',
+                        markersize=4)
+            else:
+                [line] = self.plot.plot(x, y, '.', label=name, markersize=1)
+
             self.lines[name] = line
 
         self.plot.legend(loc='upper right')
