@@ -17,6 +17,7 @@
 
 from OpenGL.GL import *
 from OpenGL.GLU import *
+from PyQt5.QtWidgets import QOpenGLWidget, QSizePolicy
 
 import solver
 
@@ -185,6 +186,145 @@ def render_cube(cube, turns):
             glEnd()
 
             glPopMatrix()
+
+# Quaternion helper functions
+
+def quat_mul(q1, q2):
+    [a, b, c, d] = q1
+    [w, x, y, z] = q2
+    return [a*w - b*x - c*y - d*z,
+        a*x + b*w + c*d - d*y,
+        a*y - b*z + c*w + d*x,
+        a*z + b*y - c*x + d*w]
+
+def quat_invert(values):
+    [w, x, y, z] = values
+    f = 1 / (w*w + x*x + y*y + z*z)
+    return [w * f, -x * f, -y * f, -z * f]
+
+def quat_normalize(values):
+    [w, x, y, z] = values
+    f = 1 / (w*w + x*x + y*y + z*z) ** .5
+    return [w * f, x * f, y * f, z * f]
+
+def quat_matrix(values):
+    [w, x, y, z] = values
+    return [
+        w*w + x*x - y*y - z*z, 2*x*y - 2*w*z, 2*x*z + 2*w*y, 0,
+        2*x*y + 2*w*z, w*w - x*x + y*y - z*z, 2*y*z - 2*w*x, 0,
+        2*x*z - 2*w*y, 2*y*z + 2*w*x, w*w - x*x - y*y + z*z, 0,
+        0, 0, 0, 1,
+    ]
+
+def vec_cross_prod(v1, v2):
+    [a, b, c] = v1
+    [x, y, z] = v2
+    return [b*z - c*y, c*x - a*z, a*y - b*x]
+
+def vec_dot_prod(v1, v2):
+    [a, b, c] = v1
+    [x, y, z] = v2
+    return a*x + b*y + c*z
+
+def vec_len_sq(v):
+    [a, b, c] = v
+    return a*a + b*b + c*c
+
+# Display widget
+
+class GLWidget(QOpenGLWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.reset()
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def reset(self):
+        self.gl_init = False
+        self.quat = self.base_quat = [1, 0, 0, 0]
+        self.zoom = -4
+        self.view_rot_x = 30
+        self.view_rot_y = 30
+        self.view_rot_z = 0
+        self.size = None
+        self.drag_start_vector = None
+        self.bg_color = [.7, .7, .7, 1]
+        self.cam_quat = [1, 0, 0, 0]
+        self.cam_base = [1, 0, 0, 0]
+
+    def set_render_data(self, cube, turns, quat):
+        self.cube = cube
+        self.turns = turns
+        self.quat = quat
+        self.update()
+
+    def set_base_quat(self):
+        self.base_quat = quat_invert(self.quat)
+
+    def initializeGL(self):
+        self.gl_init = True
+        setup()
+
+    def resizeGL(self, w, h):
+        self.size = [w, h]
+
+    def paintGL(self):
+        BG_COLOR = self.bg_color
+        reset()
+
+        set_persective(self.size, self.zoom)
+
+        q = quat_mul(self.cam_quat, self.cam_base)
+        matrix = quat_matrix(quat_normalize(q))
+        rotate_camera(matrix)
+
+        q = quat_mul(self.base_quat, self.quat)
+        matrix = quat_matrix(quat_normalize(q))
+
+        set_rotation(matrix)
+
+        glRotatef(self.view_rot_x, 1, 0, 0)
+        glRotatef(self.view_rot_y, 0, -1, 0)
+        glRotatef(self.view_rot_z, 0, 0, 1)
+
+        render_cube(self.cube, self.turns)
+
+    def reset_camera(self):
+        self.cam_quat = [1, 0, 0, 0]
+        self.cam_base = [1, 0, 0, 0]
+        self.update()
+
+    def mousePressEvent(self, event):
+        pos = event.windowPos()
+        [x, y, z] = gluUnProject(pos.x(), pos.y(), .1)
+        self.drag_start_vector = (x, -y, z)
+
+    def mouseMoveEvent(self, event):
+        pos = event.windowPos()
+        v1 = self.drag_start_vector
+        [x, y, z] = gluUnProject(pos.x(), pos.y(), .1)
+        v2 = (x, -y, z)
+        v1, v2 = v2, v1
+
+        if v1 == v2:
+            self.cam_quat = [1, 0, 0, 0]
+        else:
+            cross = vec_cross_prod(v1, v2)
+            w = (vec_len_sq(v1) * vec_len_sq(v2)) ** .5 + vec_dot_prod(v1, v2)
+            self.cam_quat = quat_normalize([w, *cross])
+
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        # Just multiply the current base
+        self.cam_base = quat_normalize(quat_mul(self.cam_quat, self.cam_base))
+        self.cam_quat = [1, 0, 0, 0]
+        self.update()
+
+    def wheelEvent(self, event):
+        delta = -event.pixelDelta().y()
+        self.zoom *= 1.002 ** delta
+        self.zoom = min(-1, max(-25, self.zoom))
+        self.update()
 
 # SVG diagram generation stuff. Not OpenGL like the rest of this
 # file, but main.py is bloated so just chuck it in here I guess.
