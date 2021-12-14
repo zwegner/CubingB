@@ -64,11 +64,6 @@ SMART_DATA_VERSION = 2
 
 # UI helpers
 
-def session_sort_key(s):
-    if s.sort_id is not None:
-        return s.sort_id
-    return s.id
-
 # Get the solve number (i.e. the number within the session, not the
 # database id)
 def get_solve_nb(session, solve):
@@ -1091,9 +1086,9 @@ class SessionWidget(QWidget):
 
     def show_graph(self, stat):
         with db.get_session() as session:
-            sesh = session.query_first(db.Settings).current_session
-            self.graph_viewer.update_data({sesh.name: sesh.solves}, stat=stat)
-            self.graph_viewer.exec()
+            s_id = session.query_first(db.Settings).current_session_id
+            self.graph_viewer.update_data([s_id], stat=stat)
+        self.graph_viewer.exec()
 
     def show_ctx_menu(self, pos):
         self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
@@ -1520,14 +1515,9 @@ class SessionEditorDialog(QDialog):
     def graph_selection(self, stat):
         with db.get_session() as session:
             rows = {item.row() for item in self.table.selectedItems()}
-            solve_sets = {}
-            for row in rows:
-                id = self.table.item(row, 0).secret_data[0] 
-                sesh = session.query_first(db.Session, id=id)
-                solve_sets[sesh.name] = sesh.solves
-
-            self.graph_viewer.update_data(solve_sets, stat=stat)
-            self.graph_viewer.exec()
+            ids = [self.table.item(row, 0).secret_data[0] for row in rows]
+            self.graph_viewer.update_data(ids, stat=stat)
+        self.graph_viewer.exec()
 
     def edit_attr(self, item):
         [id, attr, *t] = item.secret_data
@@ -1783,48 +1773,6 @@ class SmartPlaybackWidget(QWidget):
 
         # Ick, reach into parent, then into gl_widget to set this...
         self.parent.gl_widget.base_quat = solve.base_quat
-
-class SessionSelectorDialog(QDialog):
-    def __init__(self, parent):
-        super().__init__(parent)
-
-        self.label = QLabel('Session:')
-        self.selector = QComboBox()
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept_session)
-        buttons.rejected.connect(self.reject)
-
-        top = QWidget()
-        make_hbox(top, [self.label, self.selector])
-        make_vbox(self, [top, buttons])
-
-        self.selected_session = None
-        self.session_ids = []
-
-    def update_data(self, message, sessions, allow_new=False):
-        self.selected_session = None
-
-        self.label.setText(message)
-        self.selector.clear()
-        self.session_ids = []
-        for s in sessions:
-            self.session_ids.append(s.id)
-            self.selector.addItem(s.name)
-        if allow_new:
-            self.session_ids.append(None)
-            self.selector.addItem('New...')
-
-    def accept_session(self):
-        i = self.selector.currentIndex()
-        self.selected_session_id = self.session_ids[i]
-        if self.selected_session_id is None:
-            [name, accepted] = QInputDialog.getText(self, 'New session name',
-                    'Enter new session name:', text='New Session')
-            if not accepted:
-                self.reject()
-            self.selected_session_id = name
-        self.accept()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

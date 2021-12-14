@@ -912,16 +912,15 @@ class GraphDialog(QDialog):
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
         from matplotlib.figure import Figure
 
-        self.title = QLabel()
-        self.title.setStyleSheet('font: 24px')
-        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
         select_label = QLabel('Graph Type:')
         self.selector = QComboBox()
         for t in GRAPH_TYPES:
             self.selector.addItem(t)
         self.selector.currentIndexChanged.connect(self.change_type)
+
+        session_button = QPushButton('Select sessions...')
+        session_button.clicked.connect(self.change_sessions)
+        self.session_selector = SessionSelectorDialog(self)
 
         stat_label = QLabel('Stat:')
         self.stat_selector = QComboBox()
@@ -961,42 +960,56 @@ class GraphDialog(QDialog):
         self.right_limit = 1e100
 
         make_grid(self, [
-            [self.title],
-            [record_cb, None, stat_label, self.stat_selector, None,
-                    select_label, self.selector],
+            [session_button, None, record_cb, None, stat_label, self.stat_selector,
+                    None, select_label, self.selector],
             [self.canvas],
             [buttons],
-        ], stretch=[0, 1, 0, 0, 1, 0, 0])
+        ], stretch=[0, 1, 0, 1, 0, 0, 1, 0, 0])
 
     def change_record(self, value):
         self.record = bool(value)
         self.render()
 
     def change_stat(self):
-        self.stat = stat_str(STAT_AO_COUNTS[self.stat_selector.currentIndex()])
+        self.stat = STAT_AO_COUNTS[self.stat_selector.currentIndex()]
         self.render()
 
     def change_type(self):
         self.type = GRAPH_TYPES[self.selector.currentIndex()]
         self.render()
 
-    def update_data(self, solve_sets, stat=1):
+    def change_sessions(self):
+        # Update session selector with all sessions
+        with db.get_session() as session:
+            sessions = session.query(db.Session)
+            sessions = sorted(sessions.all(), key=session_sort_key)
+            self.session_selector.update_data('Sessions:', sessions, allow_multi=True)
+
+        if self.session_selector.exec():
+            ids = self.session_selector.selected_session_id
+            self.update_data(ids, stat=self.stat)
+
+    def update_data(self, session_ids, stat=1):
         self.init()
 
-        self.stat = stat_str(stat)
+        self.stat = stat
 
         with block_signals(self.stat_selector):
             self.stat_selector.setCurrentIndex(STAT_AO_COUNTS.index(stat))
 
-        self.solve_sets = {name: [(i+1, s.created_at, s.cached_stats)
-                for [i, s] in enumerate(ss)]
-                for [name, ss] in solve_sets.items()}
+        with db.get_session() as session:
+            self.solve_sets = []
+            for id in session_ids:
+                sesh = session.query_first(db.Session, id=id)
+                self.solve_sets.append((sesh.name,
+                        [(i+1, s.created_at, s.cached_stats)
+                            for [i, s] in enumerate(sesh.solves)]))
 
         self.render()
 
     def handle_move(self, event):
         # See if the user is hovering over a point, and show a tooltip if so
-        for [name, solves] in self.solve_sets.items():
+        for [name, solves] in self.solve_sets:
             line = self.lines[name]
 
             [contained, indices] = line.contains(event)
@@ -1012,7 +1025,7 @@ class GraphDialog(QDialog):
 
                 # Show some neat data there
                 [i, d, s] = solves[i]
-                t = s[self.stat]
+                t = s[stat_str(self.stat)]
                 self.tooltip.set_text('%s, %s\nSolve %s: %s' % (name,
                         d, i, ms_str(t)))
 
@@ -1071,12 +1084,6 @@ class GraphDialog(QDialog):
     def render(self):
         self.init()
 
-        if len(self.solve_sets) == 1:
-            for name in self.solve_sets.keys():
-                self.title.setText('%s: %s' % (name, self.stat))
-        else:
-            self.title.setText('%s sessions: %s' % (len(self.solve_sets), self.stat))
-
         self.figure.clear()
         self.plot = self.figure.add_subplot()
 
@@ -1088,10 +1095,10 @@ class GraphDialog(QDialog):
 
         # Preprocessing for different graph types
         if self.type == 'count':
-            maxlen = max(len(s) for s in self.solve_sets.values())
+            maxlen = max(len(s) for [_, s] in self.solve_sets)
         elif self.type == 'adaptive':
             solves_per_day = collections.Counter(d.date()
-                for [name, solves] in self.solve_sets.items() for [i, d, s] in solves)
+                for [_, solves] in self.solve_sets for [i, d, s] in solves)
             day_ordinal = {d: i for [i, d] in enumerate(sorted(solves_per_day))}
             first_day = min(solves_per_day)
 
@@ -1099,8 +1106,10 @@ class GraphDialog(QDialog):
         self.index_map = {}
         color_index = 0
 
+        stat = stat_str(self.stat)
+
         # Create plot for each session's solves
-        for [name, solves] in self.solve_sets.items():
+        for [name, solves] in self.solve_sets:
             # Autodetect colors from the session name
             color = None
             for c in COLORS:
@@ -1142,7 +1151,7 @@ class GraphDialog(QDialog):
                     dc += 1
 
             # Create y series from the given stat
-            y = [s[self.stat] / 1000 if s[self.stat] else None
+            y = [s[stat] / 1000 if s[stat] else None
                     for [i, d, s] in solves]
 
             # Record mode: only show the best stat up to a given point

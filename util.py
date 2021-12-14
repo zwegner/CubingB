@@ -20,7 +20,8 @@ import time
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
-        QTableWidgetItem, QHeaderView, QTabBar)
+        QTableWidgetItem, QHeaderView, QTabBar, QDialog, QLabel, QComboBox,
+        QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView)
 
 # Global constants
 
@@ -71,6 +72,11 @@ def ms_str(ms, prec=3):
     # Set up a format string since there's no .*f formatting
     fmt = '.%%0%sd' % prec
     return pre + fmt % (ms // (10 ** (3 - prec)))
+
+def session_sort_key(s):
+    if s.sort_id is not None:
+        return s.sort_id
+    return s.id
 
 # Qt helpers
 
@@ -152,3 +158,69 @@ def block_signals(obj):
     obj.blockSignals(True)
     yield
     obj.blockSignals(False)
+
+# Common widgets
+
+class SessionSelectorDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.label = QLabel('Session:')
+
+        self.selector = QComboBox()
+        self.multi_selector = QTableWidget()
+        set_table_columns(self.multi_selector, [''], visible=False, stretch=-1)
+        self.multi_selector.verticalHeader().hide()
+        self.multi_selector.setSelectionMode(QAbstractItemView.ExtendedSelection)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept_session)
+        buttons.rejected.connect(self.reject)
+
+        top = QWidget()
+        make_hbox(top, [self.label, self.selector, self.multi_selector])
+        make_vbox(self, [top, buttons])
+
+        self.allow_multi = False
+        self.selected_session = None
+        self.session_ids = []
+
+    def update_data(self, message, sessions, allow_new=False, allow_multi=False):
+        self.selected_session = None
+
+        self.label.setText(message)
+        self.allow_multi = allow_multi
+        if allow_multi:
+            self.multi_selector.show()
+            self.selector.hide()
+
+            self.multi_selector.clearContents()
+            self.multi_selector.setRowCount(len(sessions))
+            for [i, s] in enumerate(sessions):
+                self.multi_selector.setItem(i, 0, cell(s.name, secret_data=s.id))
+        else:
+            self.selector.show()
+            self.multi_selector.hide()
+            self.selector.clear()
+            self.session_ids = []
+            for s in sessions:
+                self.session_ids.append(s.id)
+                self.selector.addItem(s.name)
+            if allow_new:
+                self.session_ids.append(None)
+                self.selector.addItem('New...')
+
+    def accept_session(self):
+        if self.allow_multi:
+            ids = {item.secret_data for item in self.multi_selector.selectedItems()}
+            self.selected_session_id = list(ids)
+        else:
+            i = self.selector.currentIndex()
+            self.selected_session_id = self.session_ids[i]
+            if self.selected_session_id is None:
+                [name, accepted] = QInputDialog.getText(self, 'New session name',
+                        'Enter new session name:', text='New Session')
+                if not accepted:
+                    self.reject()
+                self.selected_session_id = name
+        self.accept()
