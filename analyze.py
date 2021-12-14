@@ -936,6 +936,11 @@ class GraphDialog(QDialog):
         self.figure = Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
 
+        self.figure.canvas.mpl_connect('scroll_event', self.handle_scroll)
+        self.figure.canvas.mpl_connect('button_press_event', self.handle_press)
+        self.figure.canvas.mpl_connect('button_release_event', self.handle_release)
+        self.figure.canvas.mpl_connect('motion_notify_event', self.handle_move)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok)
         buttons.accepted.connect(self.accept)
 
@@ -947,6 +952,13 @@ class GraphDialog(QDialog):
         self.index_map = None
         self.tooltip = None
         self.record = False
+
+        # Pan/zoom stuff
+        self.pressed = None
+        self.bottom_limit = -1e100
+        self.top_limit = 1e100
+        self.left_limit = -1e100
+        self.right_limit = 1e100
 
         make_grid(self, [
             [self.title],
@@ -982,7 +994,8 @@ class GraphDialog(QDialog):
 
         self.render()
 
-    def hover(self, event):
+    def handle_move(self, event):
+        # See if the user is hovering over a point, and show a tooltip if so
         for [name, solves] in self.solve_sets.items():
             line = self.lines[name]
 
@@ -1013,6 +1026,48 @@ class GraphDialog(QDialog):
                 self.tooltip.set_visible(False)
                 self.figure.canvas.draw_idle()
 
+        # Handle panning
+        if not self.pressed or event.xdata is None or event.ydata is None:
+            return
+        [ox, oy] = self.pressed
+        dx = ox - event.xdata
+        dy = oy - event.ydata
+
+        [left, right] = self.plot.get_xlim()
+        dx = min(self.right_limit - right, max(self.left_limit - left, dx))
+        self.plot.set_xlim(left + dx, right + dx)
+
+        [bottom, top] = self.plot.get_ylim()
+        dy = min(self.top_limit - top, max(self.bottom_limit - bottom, dy))
+        self.plot.set_ylim(bottom + dy, top + dy)
+
+        self.figure.canvas.draw_idle()
+
+    def handle_scroll(self, event):
+        scale = 1.1
+        if event.step > 0:
+            scale = 1 / scale
+
+        [cx, cy] = [event.xdata, event.ydata]
+
+        [left, right] = self.plot.get_xlim()
+        left = max(self.left_limit, cx - scale * (cx - left))
+        right = min(self.right_limit, cx + scale * (right - cx))
+        self.plot.set_xlim(left, right)
+
+        [bottom, top] = self.plot.get_ylim()
+        bottom = max(self.bottom_limit, cy - scale * (cy - bottom))
+        top = min(self.top_limit, cy + scale * (top - cy))
+        self.plot.set_ylim(bottom, top)
+
+        self.figure.canvas.draw_idle()
+
+    def handle_press(self, event):
+        self.pressed = (event.xdata, event.ydata)
+
+    def handle_release(self, event):
+        self.pressed = None
+
     def render(self):
         self.init()
 
@@ -1025,12 +1080,11 @@ class GraphDialog(QDialog):
         self.figure.clear()
         self.plot = self.figure.add_subplot()
 
-        # Set up tooltip, to be activated in the hover handler
+        # Set up tooltip, to be activated in the handle_move() function
         self.tooltip = self.plot.annotate('', xy=(0, 0), xytext=(20, 10),
                 textcoords='offset points', bbox={'boxstyle': 'round', 'fc': 'w'})
         self.tooltip.set_visible(False)
         self.tooltip.set_wrap(True)
-        self.figure.canvas.mpl_connect('motion_notify_event', self.hover)
 
         # Preprocessing for different graph types
         if self.type == 'count':
@@ -1115,3 +1169,7 @@ class GraphDialog(QDialog):
 
         self.plot.legend(loc='upper right')
         self.canvas.draw()
+
+        # Set the zoom limits
+        [self.left_limit, self.right_limit] = self.plot.get_xlim()
+        [self.bottom_limit, self.top_limit] = self.plot.get_ylim()
