@@ -968,11 +968,11 @@ class GraphDialog(QDialog):
 
     def change_record(self, value):
         self.record = bool(value)
-        self.render()
+        self.render(keep_ranges=True)
 
     def change_stat(self):
         self.stat = STAT_AO_COUNTS[self.stat_selector.currentIndex()]
-        self.render()
+        self.render(keep_ranges=True)
 
     def change_type(self):
         self.type = GRAPH_TYPES[self.selector.currentIndex()]
@@ -1081,8 +1081,14 @@ class GraphDialog(QDialog):
     def handle_release(self, event):
         self.pressed = None
 
-    def render(self):
+    def render(self, keep_ranges=False):
         self.init()
+
+        limit_x = None
+        limit_y = None
+        if keep_ranges and self.plot:
+            limit_x = self.plot.get_xlim()
+            limit_y = self.plot.get_ylim()
 
         self.figure.clear()
         self.plot = self.figure.add_subplot()
@@ -1176,9 +1182,16 @@ class GraphDialog(QDialog):
 
             self.lines[name] = line
 
-        self.plot.legend(loc='upper right')
-        self.canvas.draw()
-
         # Set the zoom limits
         [self.left_limit, self.right_limit] = self.plot.get_xlim()
         [self.bottom_limit, self.top_limit] = self.plot.get_ylim()
+
+        # Set the old view box if we're just changing graph parameters.
+        # Have to do this after we get the plot limits because the parameter
+        # change can affect the range of the data.
+        if keep_ranges:
+            self.plot.set_xlim(*limit_x)
+            self.plot.set_ylim(*limit_y)
+
+        self.plot.legend(loc='upper right')
+        self.canvas.draw()
