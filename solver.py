@@ -15,7 +15,15 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
-[W, Y, R, O, G, B, X] = range(7)
+import array
+import os
+import random
+
+################################################################################
+## Cube logic ##################################################################
+################################################################################
+
+[W, Y, R, O, G, B] = range(6)
 
 EDGES = ((W, G), (W, R), (W, B), (W, O),
     (G, R), (R, B), (B, O), (O, G),
@@ -24,12 +32,16 @@ CORNERS = ((W, G, R), (W, R, B), (W, B, O), (W, O, G),
     (Y, B, R), (Y, R, G), (Y, G, O), (Y, O, B))
 CENTERS = (W, Y, R, O, G, B)
 
-up    = [2, 1,  0,  3], [0, 0, 0, 0], [2, 1, 0, 3], [0, 0, 0, 0], 0
-down  = [8, 9, 10, 11], [1, 1, 1, 1], [6, 5, 4, 7], [0, 0, 0, 0], 1
-right = [1, 5,  9,  4], [1, 0, 0, 1], [0, 1, 4, 5], [2, 1, 2, 1], 2
-left  = [3, 7, 11,  6], [1, 0, 0, 1], [2, 3, 6, 7], [2, 1, 2, 1], 3
-front = [0, 4,  8,  7], [1, 0, 0, 1], [3, 0, 5, 6], [2, 1, 2, 1], 4
-back  = [2, 6, 10,  5], [1, 0, 0, 1], [1, 2, 7, 4], [2, 1, 2, 1], 5
+# Face tables: for each of the six faces, this table has the coordinates of the
+# four edges and four corners that make up the face, as they correspond to the
+# lists above of edges and corners in a solved cube. For each face, the four
+# lists below are edge position, index in edge, corner position, index in corner 
+up    = [2, 1,  0,  3], [0, 0, 0, 0], [2, 1, 0, 3], [0, 0, 0, 0]
+down  = [8, 9, 10, 11], [1, 1, 1, 1], [6, 5, 4, 7], [0, 0, 0, 0]
+right = [1, 5,  9,  4], [1, 0, 0, 1], [0, 1, 4, 5], [2, 1, 2, 1]
+left  = [3, 7, 11,  6], [1, 0, 0, 1], [2, 3, 6, 7], [2, 1, 2, 1]
+front = [0, 4,  8,  7], [1, 0, 0, 1], [3, 0, 5, 6], [2, 1, 2, 1]
+back  = [2, 6, 10,  5], [1, 0, 0, 1], [1, 2, 7, 4], [2, 1, 2, 1]
 
 faces = [up, down, right, left, front, back]
 
@@ -85,6 +97,119 @@ class Cube:
     def copy(self):
         return Cube(self.centers, self.edges, self.corners)
 
+def rotate(l, n):
+    return (*l[-n:], *l[:-n])
+
+def find_shift(l, i):
+    ii = i
+    for s in range(len(i)):
+        if i in l:
+            return (l.index(i), s)
+        i = rotate(i, 1)
+    assert 0, (l, ii)
+
+# Metabrogramming. Generate function for each of the turn and rotate moves.
+# This is pretty messy code, just the first random crap I hacked up that worked
+TURNS = []
+ROTATES = []
+def gen_turns():
+    for F in range(6):
+        FR = {}
+        TURNS.append(FR)
+        face = faces[F]
+        for n in range(1, 4):
+            E = list(range(1, 13))
+            C = [(x, 0) for x in range(8)]
+            [idx, flip, cidx, cflip] = face
+            edges = [E[i] for i in idx]
+            new_edges = edges[n:] + edges[:n]
+            new_flip = flip[n:] + flip[:n]
+            for [i, e, f, nf] in zip(idx, new_edges, flip, new_flip):
+                if f != nf:
+                    e = -e
+                E[i] = e
+
+            corners = [C[i] for i in cidx]
+            new_corners = corners[n:] + corners[:n]
+            new_cflip = cflip[n:] + cflip[:n]
+            for [i, [c, _], f, nf] in zip(cidx, new_corners, cflip, new_cflip):
+                df = 0
+                C[i] = (c, (nf-f)%3)
+
+            idxs = []
+            for e in E:
+                if e > 0:
+                    idxs.append('e[%s]' % (e-1))
+                else:
+                    e = -e - 1
+                    idxs.append('(e[%s][1], e[%s][0])' % (e, e))
+
+            cidxs = []
+            for [c, f] in C:
+                if f == 0:
+                    cidxs.append('c[%s]' % (c))
+                else:
+                    [x, y, z] = [(i + f) % 3 for i in range(3)]
+                    cidxs.append('(c[%s][%s], c[%s][%s], c[%s][%s])' % (c, x, c, y, c, z))
+
+            name = 'turn_%s_%s' % (FACE_STR[F], n)
+            code = '''
+def {name}(e, c):
+    return (({i}),
+        ({c}))'''.format(name=name, i=', '.join(idxs), c=', '.join(cidxs))
+            ctx = {}
+            exec(code, ctx)
+            FR[4 - n] = ctx[name]
+
+    for [r, rotation] in enumerate(ROTATE_FACES):
+        FR = {}
+        ROTATES.append(FR)
+        for n in range(1, 4):
+            rot = list(range(6))
+            for i in range(n):
+                rot = [rot[x] for x in rotation]
+            E = []
+            C = []
+            for [a, b] in EDGES:
+                edge = (rot[a], rot[b])
+                E.append(find_shift(EDGES, edge))
+            for [a, b, c] in CORNERS:
+                corner = (rot[a], rot[b], rot[c])
+                C.append(find_shift(CORNERS, corner))
+
+            cnidxs = ['cn[%s]' % f for f in rot]
+
+            idxs = []
+            for [e, f] in E:
+                if f == 0:
+                    idxs.append('e[%s]' % (e))
+                else:
+                    idxs.append('(e[%s][1], e[%s][0])' % (e, e))
+
+            cidxs = []
+            for [c, f] in C:
+                if f == 0:
+                    cidxs.append('c[%s]' % (c))
+                else:
+                    [x, y, z] = [(i + f) % 3 for i in range(3)]
+                    cidxs.append('(c[%s][%s], c[%s][%s], c[%s][%s])' % (c, x, c, y, c, z))
+
+            name = 'rotate_%s_%s' % (ROTATE_STR[r], n)
+            code = '''
+def {name}(cn, e, c):
+    return (({cn}),
+        ({i}),
+        ({c}))'''.format(name=name, cn=', '.join(cnidxs), i=', '.join(idxs), c=', '.join(cidxs))
+            ctx = {}
+            exec(code, ctx)
+            FR[4 - n] = ctx[name]
+
+gen_turns()
+
+################################################################################
+## CFOP logic helpers ##########################################################
+################################################################################
+
 SOLVED_CUBE = Cube()
 
 # Create CFOP tables the lazy way
@@ -134,111 +259,9 @@ def is_oll_solved(cube, cross_color):
     return (all(cube.corners[i][j] == ll for [i, j] in OLL_CORNERS[cross_color]) and
             all(cube.edges[i][j] == ll for [i, j] in OLL_EDGES[cross_color]))
 
-# Metabrogramming. Generate function for each of the turn and rotate moves.
-# This is pretty messy code, just the first random crap I hacked up that worked
-TURNS = []
-ROTATES = []
-def gen_turns():
-    for F in range(6):
-        FR = {}
-        TURNS.append(FR)
-        face = faces[F]
-        for n in range(1, 4):
-            E = list(range(1, 13))
-            C = [(x, 0) for x in range(8)]
-            [idx, flip, cidx, cflip, _] = face
-            edges = [E[i] for i in idx]
-            new_edges = edges[n:] + edges[:n]
-            new_flip = flip[n:] + flip[:n]
-            for [i, e, f, nf] in zip(idx, new_edges, flip, new_flip):
-                if f != nf:
-                    e = -e
-                E[i] = e
-
-            corners = [C[i] for i in cidx]
-            new_corners = corners[n:] + corners[:n]
-            new_cflip = cflip[n:] + cflip[:n]
-            for [i, [c, _], f, nf] in zip(cidx, new_corners, cflip, new_cflip):
-                df = 0
-                C[i] = (c, (nf-f)%3)
-
-            idxs = []
-            for e in E:
-                if e > 0:
-                    idxs.append('e[%s]' % (e-1))
-                else:
-                    e = -e - 1
-                    idxs.append('(e[%s][1], e[%s][0])' % (e, e))
-
-            cidxs = []
-            for [c, f] in C:
-                if f == 0:
-                    cidxs.append('c[%s]' % (c))
-                else:
-                    [x, y, z] = [(i + f) % 3 for i in range(3)]
-                    cidxs.append('(c[%s][%s], c[%s][%s], c[%s][%s])' % (c, x, c, y, c, z))
-
-            name = 'turn_%s_%s' % (FACE_STR[F], n)
-            code = '''
-def {name}(e, c):
-    return (({i}),
-        ({c}))'''.format(name=name, i=', '.join(idxs), c=', '.join(cidxs))
-            ctx = {}
-            exec(code, ctx)
-            FR[4 - n] = ctx[name]
-
-    def find_shift(l, i):
-        ii = i
-        for s in range(len(i)):
-            if i in l:
-                return (l.index(i), s)
-            i = (i[-1], *i[:-1])
-        assert 0, (l, ii)
-
-    for [r, rotation] in enumerate(ROTATE_FACES):
-        FR = {}
-        ROTATES.append(FR)
-        for n in range(1, 4):
-            rot = list(range(6))
-            for i in range(n):
-                rot = [rot[x] for x in rotation]
-            E = []
-            C = []
-            for [a, b] in EDGES:
-                edge = (rot[a], rot[b])
-                E.append(find_shift(EDGES, edge))
-            for [a, b, c] in CORNERS:
-                corner = (rot[a], rot[b], rot[c])
-                C.append(find_shift(CORNERS, corner))
-
-            cnidxs = ['cn[%s]' % f for f in rot]
-
-            idxs = []
-            for [e, f] in E:
-                if f == 0:
-                    idxs.append('e[%s]' % (e))
-                else:
-                    idxs.append('(e[%s][1], e[%s][0])' % (e, e))
-
-            cidxs = []
-            for [c, f] in C:
-                if f == 0:
-                    cidxs.append('c[%s]' % (c))
-                else:
-                    [x, y, z] = [(i + f) % 3 for i in range(3)]
-                    cidxs.append('(c[%s][%s], c[%s][%s], c[%s][%s])' % (c, x, c, y, c, z))
-
-            name = 'rotate_%s_%s' % (ROTATE_STR[r], n)
-            code = '''
-def {name}(cn, e, c):
-    return (({cn}),
-        ({i}),
-        ({c}))'''.format(name=name, cn=', '.join(cnidxs), i=', '.join(idxs), c=', '.join(cidxs))
-            ctx = {}
-            exec(code, ctx)
-            FR[4 - n] = ctx[name]
-
-gen_turns()
+################################################################################
+## Utilities ###################################################################
+################################################################################
 
 def move_str(face, turn):
     return FACE_STR[face] + TURN_STR[turn]
@@ -338,3 +361,566 @@ def invert_alg(alg, cancel_rotations=False):
         turn = parse_rot(m[1:])
         moves.append(m[0] + TURN_STR[4 - turn])
     return ' '.join(moves)
+
+def gen_random_move_scramble():
+    scramble = []
+    all_faces = set(range(6))
+    blocked_faces = set()
+    turns = [-1, 1, 2]
+    # Just do N random moves for now, not random state scrambles
+    for i in range(24):
+        face = random.choice(list(all_faces - blocked_faces))
+        # Only allow one turn of each of an opposing pair of faces in a row.
+        # E.g. F B' is allowed, F B' F is not
+        if face ^ 1 not in blocked_faces:
+            blocked_faces = set()
+        blocked_faces.add(face)
+
+        turn = random.choice(turns)
+        scramble.append(move_str(face, turn))
+    return scramble
+
+################################################################################
+## Actual solver stuff #########################################################
+################################################################################
+
+# This solver is basically Kociemba's two-phase algorithm. The first phase puts
+# a random cube into the G1 group (i.e. cubes that can be solved using only
+# <U,D,R2,L2,F2,B2> moves). The second phase solves the cube completely using
+# only the G1 moves.
+#
+# To make this problem much easier, each phase is broken down into subproblems
+# that are solved simultaneously. For the first phase, the three subproblems are:
+#   * Orienting all the corners, so the top or bottom color matches the top or
+#       bottom center
+#   * Orienting all the edges so they can be solved with G1 moves
+#   * Putting all the E-slice edges in the E slice (i.e. not on the U or D layers)
+# For phase 2, the subproblems are:
+#   * Permuting all the corners
+#   * Permuting all the U/D layer edges
+#   * Permuting the E-slice edges
+#
+# So for each phase, we try to find a sequence of moves that solves all the
+# subproblems at once. There are a huge number of possibilities to search here,
+# but we can prune the search space considerably by utilizing lookup tables.
+# If the table tells us that the current corner orientation needs at least 5
+# moves to solve, then the entire phase 1 needs at least 5 moves as well. We
+# use larger lookup tables that are based on pairs of subproblems in order to
+# prune even more (e.g. for phase 1, we use three tables: corner/edge orientation,
+# corner orientation/e-slice position, and edge orientation/e-slice position).
+# These are fairly easy/quick to generate (a handful of seconds), but we still
+# cache them on disk for faster startup. For phase 2, note that we don't use
+# a pruning table for the corner/edge permutation pair, since it'd be pretty big.
+#
+# The overall search looks iteratively deeper at phase 1 solutions until the
+# shortest sequence is found, then the shortest phase 2 solution is searched
+# from there using another round of iterative deepening. After a solution is
+# found, we can look for shorter solutions by allowing the phase 1 solution
+# to get longer (but limiting the maximum overall depth of the phase 2 iterative
+# deepening).
+#
+# To make the search faster, we can use a simplified cube representation for
+# each phase. For all the "subproblems" of solving the cube, (e.g. orienting
+# all corners), there's an index associated with each cube state for that
+# subproblem. For orienting corners, there are 3^7 possibilities (7 corners
+# with 3 orientations each, the last corner's orientation is determined by the
+# others), and the state of the corners can be mapped to a number 0..2187 for
+# each possibility. So we can represent the cube by three indices for each
+# phase:
+#   * Phase 1: c, e, s (corner orientation, edge orientation, slice position)
+#       ranges: (3^7=2187, 2^11=2048, 12 choose 4=24)
+#   * Phase 2: c, e, s (corner permutation, edge permutation, slice permutation)
+#       ranges: (8!=40320, 8!=40320, 4!=24)
+# To update these representations when moves are performed, we use more lookup
+# tables. These give, for a given index, a list of successor indices when each
+# of the 18 standard moves is applied (one of six faces with 90/180/270 degree
+# rotation). Or for phase 2, 10 standard moves (since only 180 degree moves are
+# allowed for RLFB).
+#
+# There's also a transition phase whenever we reach phase 2 to convert between
+# the two index-based representations. We simply run the phase 1 solution
+# on a normal cube and then convert that representation to the phase 2 indexing.
+# This is a bit slow/weird, but is rare enough that indexing is still faster and
+# simpler overall.
+
+# Move tables, phase 1
+CORNER_MOVES_1 = [None] * 2187
+EDGE_MOVES_1 = [None] * 2048
+ESLICE_MOVES_1 = [None] * 495
+# ...and phase 2
+CORNER_MOVES_2 = [None] * 40320
+EDGE_MOVES_2 = [None] * 40320
+ESLICE_MOVES_2 = [None] * 24
+
+# Tables to convert tuples to dense indices for the indices that aren't easy
+# to generate numerically
+ESLICE_INDEX_1 = {}
+CORNER_INDEX_2 = {}
+EDGE_INDEX_2 = {}
+ESLICE_INDEX_2 = {}
+
+# Pruning tables, phase 1
+CORNER_EDGE_LEN_1 = 2187 * 2048
+CORNER_ESLICE_LEN_1 = 2187 * 495
+EDGE_ESLICE_LEN_1 = 2048 * 495
+CORNER_EDGE_DEPTH_1 = array.array('b', [-1] * CORNER_EDGE_LEN_1)
+CORNER_ESLICE_DEPTH_1 = array.array('b', [-1] * CORNER_ESLICE_LEN_1)
+EDGE_ESLICE_DEPTH_1 = array.array('b', [-1] * EDGE_ESLICE_LEN_1)
+# ...and phase 2
+CORNER_ESLICE_LEN_2 = 40320 * 24
+EDGE_ESLICE_LEN_2 = 40320 * 24
+CORNER_ESLICE_DEPTH_2 = array.array('b', [-1] * CORNER_ESLICE_LEN_2)
+EDGE_ESLICE_DEPTH_2 = array.array('b', [-1] * EDGE_ESLICE_LEN_2)
+
+PHASE_1_MOVES = [s + t for s in FACE_STR for t in ['', '2', "'"]]
+PHASE_2_MOVES = [m for m in PHASE_1_MOVES if m[0] in 'UD' or m.endswith('2')]
+FACE_1 = [f for f in range(6) for t in range(1, 4)]
+FACE_2 = [f for f in range(6) for t in range(1, 4) if f >> 1 == 0 or t == 2]
+
+SOLVED_C_1 = 0
+SOLVED_E_1 = 175
+SOLVED_S_1 = 0
+SOLVED_INDICES_1 = (SOLVED_C_1, SOLVED_E_1, SOLVED_S_1)
+
+SOLVED_C_2 = 0
+SOLVED_E_2 = 0
+SOLVED_S_2 = 0
+SOLVED_INDICES_2 = (SOLVED_C_2, SOLVED_E_2, SOLVED_S_2)
+
+INDEX_CACHE_PATH = 'rsrc/solver-indices.bin'
+
+FACTORIAL = [1, 1]
+for i in range(2, 13):
+    FACTORIAL.append(FACTORIAL[i-1] * i)
+
+# Number of phase 1 solutions to search
+MAX_PROBES = 10
+
+# Index helper functions. These convert a regular cube (i.e. the Cube class)
+# into the index representations used for searching
+
+# Phase 1 indices
+
+def get_corner_index_1(cube):
+    index = 0
+    # Find the position of the white or yellow face on the first seven corners
+    for [i, corner] in enumerate(cube.corners[:7]):
+        if W in corner:
+            s = corner.index(W)
+        else:
+            s = corner.index(Y)
+        index += 3 ** i * s
+    return index
+
+def get_edge_index_1(cube):
+    index = 0
+    for [i, edge] in enumerate(cube.edges[:11]):
+        index |= (edge[1] > edge[0]) << i
+    return index
+
+# It's a bit hard to generate an index for the e-slice orientation, since
+# it's permutation-invariant, so we just generate a sorted tuple here. We
+# use this to generate a dense lookup table that converts tuple to index.
+def get_eslice_sparse_index_1(cube):
+    index = [None] * 4
+    for [i, edge] in enumerate(EDGES[4:8]):
+        (j, s) = find_shift(cube.edges, edge)
+        index[i] = j
+    return tuple(sorted(index))
+
+def get_eslice_index_1(cube):
+    return ESLICE_INDEX_1[get_eslice_sparse_index_1(cube)]
+
+# Phase 2 indices
+
+def get_corner_sparse_index_2(cube):
+    index = [None] * 8
+    for [i, corner] in enumerate(CORNERS):
+        (j, s) = find_shift(cube.corners, corner)
+        index[i] = j
+    return tuple(index)
+
+def get_edge_sparse_index_2(cube):
+    index = [None] * 8
+    for [i, edge] in enumerate(EDGES[0:4] + EDGES[8:12]):
+        (j, s) = find_shift(cube.edges, edge)
+        index[i] = j
+    return tuple(index)
+
+def get_eslice_sparse_index_2(cube):
+    index = [None] * 4
+    for [i, edge] in enumerate(EDGES[4:8]):
+        (j, s) = find_shift(cube.edges, edge)
+        index[i] = j
+    return tuple(index)
+
+def get_corner_index_2(cube):
+    return CORNER_INDEX_2[get_corner_sparse_index_2(cube)]
+
+def get_edge_index_2(cube):
+    return EDGE_INDEX_2[get_edge_sparse_index_2(cube)]
+
+def get_eslice_index_2(cube):
+    return ESLICE_INDEX_2[get_eslice_sparse_index_2(cube)]
+
+# For a given index function, generate all the possiblities and a table to
+# transition between indices from the standard moves. If the given index function
+# is not a dense integer representation, then we also fill in the index_table to
+# convert to one.
+def gen_move_tables(get_index, move_set, move_table, index_table=None):
+    cube = Cube()
+    i = get_index(cube)
+    if index_table is not None:
+        index_table[i] = 0
+        i = 0
+
+    current = [(cube, i)]
+
+    seen = set()
+
+    while current:
+        next = []
+        while current:
+            [cube, i] = current.pop()
+
+            moves = move_table[i] = []
+
+            for [face, turn] in move_set:
+                child = cube.copy()
+                child.turn(face, turn)
+
+                i = get_index(child)
+
+                if index_table is not None:
+                    if i not in index_table:
+                        index_table[i] = len(index_table)
+                    i = index_table[i]
+
+                moves.append(i)
+
+                if i not in seen:
+                    seen.add(i)
+                    next.append((child, i))
+
+        current = next
+
+# Fill in a pruning table using a pair of index functions. We use the move
+# tables to exhaustively enumerate all the possibilities, by making successive
+# moves starting from a solved cube. We keep track of how many moves are
+# required and fill the value into the given depth table, which is the minimum
+# number of moves required to solve the two given subproblems together.
+def gen_prune_tables(i_1, i_2, i_base, move_table_1, move_table_2, depth_table):
+    key = i_1 + i_2 * i_base
+    depth_table[key] = 0
+    current = [(i_1, i_2)]
+
+    depth = 1
+    while current:
+        next = []
+        # From the current list of positions that take <depth-1> moves to reach,
+        # find all the positions that take <depth> moves to reach
+        while current:
+            [i_1, i_2] = current.pop()
+
+            for [c_1, c_2] in zip(move_table_1[i_1], move_table_2[i_2]):
+                key = c_1 + c_2 * i_base
+
+                # Only search further if the position hasn't been found before
+                if depth_table[key] == -1:
+                    depth_table[key] = depth
+                    next.append((c_1, c_2))
+
+        current = next
+        depth += 1
+
+def gen_indices():
+    global CORNER_MOVES_1, EDGE_MOVES_1, ESLICE_MOVES_1
+    global ESLICE_INDEX_1
+    global CORNER_EDGE_DEPTH_1, CORNER_ESLICE_DEPTH_1, EDGE_ESLICE_DEPTH_1
+    global CORNER_MOVES_2, EDGE_MOVES_2, ESLICE_MOVES_2
+    global CORNER_INDEX_2, EDGE_INDEX_2, ESLICE_INDEX_2
+    global CORNER_ESLICE_DEPTH_2, EDGE_ESLICE_DEPTH_2
+
+    # See if the tables are cached on disk, and deserialize them if so
+    if os.path.exists(INDEX_CACHE_PATH):
+        with open(INDEX_CACHE_PATH, 'rb') as f:
+            data = f.read()
+
+        # Split the binary data into a bunch of chunks of the given lengths
+        lengths = [
+            # Phase 1 moves
+            2*18*2187, 2*18*2048, 2*18*495,
+            # Phase 1 index lookups
+            2*5*495,
+            # Phase 1 pruning tables
+            CORNER_EDGE_LEN_1, CORNER_ESLICE_LEN_1, EDGE_ESLICE_LEN_1,
+            # Phase 2 moves
+            2*10*40320, 2*10*40320, 2*10*24,
+            # Phase 2 index lookups
+            2*9*40320, 2*9*40320, 5*24,
+            # Phase 2 pruning tables
+            CORNER_ESLICE_LEN_2, EDGE_ESLICE_LEN_2,
+        ]
+
+        chunks = []
+        for l in lengths:
+            assert len(data) >= l
+            chunks.append(data[:l])
+            data = data[l:]
+        assert not data, len(data)
+
+        # Helper to create an array of the given type from the given data,
+        # splitting it into sublists of a given length if requested
+        def make(t, b, split=0):
+            a = array.array(t)
+            a.frombytes(b)
+            if split:
+                a = [a[i:i+split] for i in range(0, len(a), split)]
+            return a
+
+        # Helper to make an index table from the data in t, into l entries
+        # mapping c-1 values to one index
+        def make_index(t, l, c, tp='H'):
+            t = make(tp, t)
+            return {tuple(t[i:i+c-1]): t[i+c-1] for i in range(0, c*l, c)}
+
+        [c_m_1, e_m_1, s_m_1, s_i_1, c_e_d_1, c_s_d_1, e_s_d_1,
+                c_m_2, e_m_2, s_m_2, c_i_2, e_i_2, s_i_2, c_s_d_2, e_s_d_2] = chunks
+
+        CORNER_MOVES_1 = make('H', c_m_1, split=18)
+        EDGE_MOVES_1 = make('H', e_m_1, split=18)
+        ESLICE_MOVES_1 = make('H', s_m_1, split=18)
+
+        ESLICE_INDEX_1 = make_index(s_i_1, 495, 5)
+
+        CORNER_EDGE_DEPTH_1 = make('B', c_e_d_1)
+        CORNER_ESLICE_DEPTH_1 = make('B', c_s_d_1)
+        EDGE_ESLICE_DEPTH_1 = make('B', e_s_d_1)
+
+        CORNER_MOVES_2 = make('H', c_m_2, split=10)
+        EDGE_MOVES_2 = make('H', e_m_2, split=10)
+        ESLICE_MOVES_2 = make('H', s_m_2, split=10)
+
+        CORNER_INDEX_2 = make_index(c_i_2, 40320, 9)
+        EDGE_INDEX_2 = make_index(e_i_2, 40320, 9)
+        ESLICE_INDEX_2 = make_index(s_i_2, 24, 5, tp='B')
+
+        CORNER_ESLICE_DEPTH_2 = make('b', c_s_d_2)
+        EDGE_ESLICE_DEPTH_2 = make('b', e_s_d_2)
+
+        return
+
+    # Generate tables
+    phase_1_moves = [(f, t) for f in range(6) for t in range(1, 4)]
+    phase_2_moves = [(f, t) for [f, t] in phase_1_moves
+            if f >> 1 == 0 or t == 2]
+
+    gen_move_tables(get_corner_index_1, phase_1_moves, CORNER_MOVES_1)
+    gen_move_tables(get_edge_index_1, phase_1_moves, EDGE_MOVES_1)
+    gen_move_tables(get_eslice_sparse_index_1, phase_1_moves, ESLICE_MOVES_1,
+            index_table=ESLICE_INDEX_1)
+
+    gen_move_tables(get_corner_sparse_index_2, phase_2_moves, CORNER_MOVES_2,
+            index_table=CORNER_INDEX_2)
+    gen_move_tables(get_edge_sparse_index_2, phase_2_moves, EDGE_MOVES_2,
+            index_table=EDGE_INDEX_2)
+    gen_move_tables(get_eslice_sparse_index_2, phase_2_moves, ESLICE_MOVES_2,
+            index_table=ESLICE_INDEX_2)
+
+    gen_prune_tables(SOLVED_C_1, SOLVED_E_1, 2187, CORNER_MOVES_1, EDGE_MOVES_1,
+            CORNER_EDGE_DEPTH_1)
+    gen_prune_tables(SOLVED_C_1, SOLVED_S_1, 2187, CORNER_MOVES_1, ESLICE_MOVES_1,
+            CORNER_ESLICE_DEPTH_1)
+    gen_prune_tables(SOLVED_E_1, SOLVED_S_1, 2048, EDGE_MOVES_1, ESLICE_MOVES_1,
+            EDGE_ESLICE_DEPTH_1)
+
+    gen_prune_tables(SOLVED_C_2, SOLVED_S_2, 40320, CORNER_MOVES_2, ESLICE_MOVES_2,
+            CORNER_ESLICE_DEPTH_2)
+    gen_prune_tables(SOLVED_E_2, SOLVED_S_2, 40320, EDGE_MOVES_2, ESLICE_MOVES_2,
+            EDGE_ESLICE_DEPTH_2)
+
+    # Write the generated tables to disk
+    with open(INDEX_CACHE_PATH, 'wb') as f:
+        # Helper to flatten a list of lists into just a list. I'd usually use
+        # sum(ll, []) but that has some O(n^2) behavior apparently
+        def flatten(ll):
+            return [i for l in ll for i in l]
+
+        # Phase 1
+        moves_1 = array.array('H', flatten(CORNER_MOVES_1 + EDGE_MOVES_1 +
+                ESLICE_MOVES_1))
+        s_i_1 = array.array('H', flatten([[*k, v]
+                for [k, v] in ESLICE_INDEX_1.items()]))
+        f.write(moves_1.tobytes())
+        f.write(s_i_1.tobytes())
+        f.write(CORNER_EDGE_DEPTH_1.tobytes())
+        f.write(CORNER_ESLICE_DEPTH_1.tobytes())
+        f.write(EDGE_ESLICE_DEPTH_1.tobytes())
+
+        # Phase 2
+        m2 = flatten(CORNER_MOVES_2 + EDGE_MOVES_2 +
+                ESLICE_MOVES_2)
+        moves_2 = array.array('H', m2)
+        c_i_2 = array.array('H', flatten([[*k, v]
+                for [k, v] in CORNER_INDEX_2.items()]))
+        e_i_2 = array.array('H', flatten([[*k, v]
+                for [k, v] in EDGE_INDEX_2.items()]))
+        s_i_2 = array.array('B', flatten([[*k, v]
+                for [k, v] in ESLICE_INDEX_2.items()]))
+        f.write(moves_2.tobytes())
+        f.write(c_i_2.tobytes() + e_i_2.tobytes() + s_i_2.tobytes())
+        f.write(CORNER_ESLICE_DEPTH_2.tobytes())
+        f.write(EDGE_ESLICE_DEPTH_2.tobytes())
+
+gen_indices()
+
+class SolverContext:
+    def __init__(self):
+        self.probes = 0
+        self.nodes = 0
+        self.max_depth = 1000
+        self.initial_cube = None
+        self.solution_cache = set()
+        self.best_solution = None
+
+# Phase 1 recursive search
+def phase_1(ctx, c, e, s, last_face, moves, depth):
+    ctx.nodes += 1
+    # See if we've solved phase 1
+    if (c, e, s) == SOLVED_INDICES_1:
+        # Make sure we haven't searched this exact sequence before
+        key = tuple(moves)
+        if key in ctx.solution_cache:
+            return
+        ctx.solution_cache.add(key)
+
+        # Set up cube for phase 2
+        alg = ' '.join(PHASE_1_MOVES[i] for i in moves)
+        cube = ctx.initial_cube.copy()
+        cube.run_alg(alg)
+        c_2 = get_corner_index_2(cube)
+        e_2 = get_edge_index_2(cube)
+        s_2 = get_eslice_index_2(cube)
+        # And search phase 2
+        ctx.probes += 1
+        for d in range(ctx.max_depth - len(moves)):
+            if phase_2(ctx, c_2, e_2, s_2, last_face, moves, [], d):
+                return ctx.probes > MAX_PROBES
+        if ctx.probes > MAX_PROBES:
+            return True
+        return False
+    if depth == 0:
+        return False
+
+    # Look through all the possible moves
+    for [m, [c_n, e_n, s_n]] in enumerate(zip(CORNER_MOVES_1[c], EDGE_MOVES_1[e],
+            ESLICE_MOVES_1[s])):
+        # Don't turn the same face twice in a row, and only turn the opposite face
+        # if it's lower (so D U is allowed but not U D)
+        face = FACE_1[m]
+        if face == last_face or face & ~1 == last_face:
+            continue
+
+        # Prune the search if this move leads to a position needing too many
+        # moves to solve
+        if (CORNER_EDGE_DEPTH_1[c_n + 2187*e_n] >= depth or
+                CORNER_ESLICE_DEPTH_1[c_n + 2187*s_n] >= depth or
+                EDGE_ESLICE_DEPTH_1[e_n + 2048*s_n] >= depth):
+            continue
+
+        if phase_1(ctx, c_n, e_n, s_n, face, moves + [m], depth - 1):
+            return True
+
+    return False
+
+# Phase 2 recursive search
+def phase_2(ctx, c, e, s, last_face, moves_1, moves_2, depth):
+    ctx.nodes += 1
+    # See if we've solved phase 2
+    if (c, e, s) == SOLVED_INDICES_2:
+        ctx.best_solution = [moves_1, moves_2]
+        # Set overall max depth so we only try to find solutions shorted than this
+        ctx.max_depth = len(moves_1) + len(moves_2)
+        return True
+    if depth == 0:
+        return False
+
+    # Look through all the possible moves
+    for [m, [c_n, e_n, s_n]] in enumerate(zip(CORNER_MOVES_2[c], EDGE_MOVES_2[e],
+            ESLICE_MOVES_2[s])):
+        # Don't turn the same face twice in a row, and only turn the opposite face
+        # if it's lower (so D U is allowed but not U D)
+        face = FACE_2[m]
+        if face == last_face or face & ~1 == last_face:
+            continue
+
+        # Prune the search if this move leads to a position needing too many
+        # moves to solve
+        if (CORNER_ESLICE_DEPTH_2[c_n + 40320*s_n] >= depth or
+                EDGE_ESLICE_DEPTH_2[e_n + 40320*s_n] >= depth):
+            continue
+
+        if phase_2(ctx, c_n, e_n, s_n, face, moves_1, moves_2 + [m], depth - 1):
+            return True
+
+    return False
+
+def get_parity(index, n):
+    parity = 0
+    for i in range(2, n + 1):
+        [index, m] = divmod(index, i)
+        parity ^= m
+    return parity & 1
+
+# Random state scramble generator
+def gen_random_state_scramble():
+    # Generate random corner/edge orientation/permutation
+    co = random.randrange(2187) # 3^7
+    eo = random.randrange(2048) # 2^11
+    while True:
+        cp = random.randrange(FACTORIAL[8])
+        ep = random.randrange(FACTORIAL[12])
+        if get_parity(cp, 8) == get_parity(ep, 12):
+            break
+
+    # Permute and orient a piece set (corners or edges). This pulls pieces from
+    # the <solved> list according to the <perm> number, then orients them
+    # according to the <orient> number. This works over <n> pieces with <r>
+    # possible orientations each.
+    def permute_orient(result, solved, orient, perm, n, r):
+        result = [None] * n
+        # Copy to a mutable list so we can pull items out when permuting
+        solved = list(solved)
+        # Permute
+        for i in range(n):
+            [d, perm] = divmod(perm, FACTORIAL[n - i - 1])
+            result[i] = solved.pop(d)
+        # Orient
+        total = 0
+        for i in range(n - 1):
+            [orient, d] = divmod(orient, r)
+            result[i] = rotate(result[i], d)
+            total += d
+        # Orient the last piece so the total orientation is 0 modulo r
+        result[n - 1] = rotate(result[n - 1], -total % r)
+        return result
+
+    corners = permute_orient(SOLVED_CUBE.corners, co, cp, 8, 3)
+    edges = permute_orient(SOLVED_CUBE.edges, eo, ep, 12, 2)
+
+    cube = Cube(corners=tuple(corners), edges=tuple(edges))
+    ctx = SolverContext()
+    ctx.initial_cube = cube
+    c = get_corner_index_1(cube)
+    e = get_edge_index_1(cube)
+    s = get_eslice_index_1(cube)
+
+    # Main iterative deepening search loop
+    for depth in range(1, 20):
+        if phase_1(ctx, c, e, s, None, [], depth):
+            break
+
+    # Assemble the final scramble by inverting the best phase 1/2 moves
+    [m_1, m_2] = ctx.best_solution
+    moves = [PHASE_1_MOVES[i] for i in m_1] + [PHASE_2_MOVES[i] for i in m_2]
+    return invert_alg(' '.join(moves)).split()

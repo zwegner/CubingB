@@ -411,25 +411,12 @@ class CubeWindow(QMainWindow):
             self.state = State.SMART_SCRAMBLING
         else:
             self.state = State.SCRAMBLE
-        self.scramble = []
         self.solve_moves = []
         self.start_time = None
         self.end_time = None
 
-        all_faces = set(range(6))
-        blocked_faces = set()
-        turns = [-1, 1, 2]
-        # Just do N random moves for now, not random state scrambles
-        for i in range(SCRAMBLE_MOVES):
-            face = random.choice(list(all_faces - blocked_faces))
-            # Only allow one turn of each of an opposing pair of faces in a row.
-            # E.g. F B' is allowed, F B' F is not
-            if face ^ 1 not in blocked_faces:
-                blocked_faces = set()
-            blocked_faces.add(face)
+        self.scramble = solver.gen_random_state_scramble()
 
-            turn = random.choice(turns)
-            self.scramble.append(solver.move_str(face, turn))
         self.scramble_left = self.scramble[:]
 
         self.mark_scramble_changed()
