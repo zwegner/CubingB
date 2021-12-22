@@ -458,6 +458,9 @@ ESLICE_INDEX_1 = {}
 CORNER_INDEX_2 = {}
 EDGE_INDEX_2 = {}
 ESLICE_INDEX_2 = {}
+# And a table to convert corner permutation to permutation of four corners
+# (to make a smaller pruning table for phase 2)
+CCOMBP_INDEX = []
 
 # Pruning tables, phase 1
 CORNER_EDGE_LEN_1 = 2187 * 2048
@@ -469,8 +472,10 @@ EDGE_ESLICE_DEPTH_1 = array.array('b', [-1] * EDGE_ESLICE_LEN_1)
 # ...and phase 2
 CORNER_ESLICE_LEN_2 = 40320 * 24
 EDGE_ESLICE_LEN_2 = 40320 * 24
+CCOMBP_EDGE_LEN_2 = 140 * 40320
 CORNER_ESLICE_DEPTH_2 = array.array('b', [-1] * CORNER_ESLICE_LEN_2)
 EDGE_ESLICE_DEPTH_2 = array.array('b', [-1] * EDGE_ESLICE_LEN_2)
+CCOMBP_EDGE_DEPTH_2 = array.array('b', [-1] * CCOMBP_EDGE_LEN_2)
 
 PHASE_1_MOVES = [s + t for s in FACE_STR for t in ['', '2', "'"]]
 PHASE_2_MOVES = [m for m in PHASE_1_MOVES if m[0] in 'UD' or m.endswith('2')]
@@ -494,7 +499,7 @@ for i in range(2, 13):
     FACTORIAL.append(FACTORIAL[i-1] * i)
 
 # Number of phase 1 solutions to search
-MAX_PROBES = 10
+MAX_PROBES = 100
 
 # Index helper functions. These convert a regular cube (i.e. the Cube class)
 # into the index representations used for searching
@@ -563,6 +568,59 @@ def get_edge_index_2(cube):
 def get_eslice_index_2(cube):
     return ESLICE_INDEX_2[get_eslice_sparse_index_2(cube)]
 
+# Get position of the first 4 corners
+def get_ccomb_index(cube):
+    index = [None] * 4
+    for [i, corner] in enumerate(CORNERS[:4]):
+        (j, s) = find_shift(cube.corners, corner)
+        index[i] = j
+    return tuple(sorted(index))
+
+def get_parity(index, n):
+    parity = 0
+    for i in range(2, n + 1):
+        [index, m] = divmod(index, i)
+        parity ^= m
+    return parity & 1
+
+# Permute and orient a piece set (corners or edges). This pulls pieces from
+# the <solved> list according to the <perm> number, then orients them
+# according to the <orient> number. This works over <n> pieces with <r>
+# possible orientations each.
+def permute_orient(solved, orient, perm, n, r):
+    result = [None] * n
+    # Copy to a mutable list so we can pull items out when permuting
+    solved = list(solved)
+    # Permute
+    for i in range(n):
+        [d, perm] = divmod(perm, FACTORIAL[n - i - 1])
+        result[i] = solved.pop(d)
+    # Orient
+    total = 0
+    for i in range(n - 1):
+        [orient, d] = divmod(orient, r)
+        result[i] = rotate(result[i], d)
+        total += d
+    # Orient the last piece so the total orientation is 0 modulo r
+    result[n - 1] = rotate(result[n - 1], -total % r)
+    return result
+
+# Generate reduced corner (perm of first 4 corners only)/parity index for phase 2
+def gen_ccomb_indices():
+    global CCOMBP_INDEX
+    CCOMBP_INDEX = [None] * FACTORIAL[8]
+    ccomb_index = {}
+    for cp in range(FACTORIAL[8]):
+        corners = permute_orient(SOLVED_CUBE.corners, 0, cp, 8, 3)
+        cube = Cube(corners=tuple(corners))
+
+        cc = (get_parity(cp, 8), *get_ccomb_index(cube))
+        if cc not in ccomb_index:
+            ccomb_index[cc] = len(ccomb_index)
+        cc = ccomb_index[cc]
+        c = get_corner_index_2(cube)
+        CCOMBP_INDEX[c] = cc
+
 # For a given index function, generate all the possiblities and a table to
 # transition between indices from the standard moves. If the given index function
 # is not a dense integer representation, then we also fill in the index_table to
@@ -609,8 +667,10 @@ def gen_move_tables(get_index, move_set, move_table, index_table=None):
 # moves starting from a solved cube. We keep track of how many moves are
 # required and fill the value into the given depth table, which is the minimum
 # number of moves required to solve the two given subproblems together.
-def gen_prune_tables(i_1, i_2, i_base, move_table_1, move_table_2, depth_table):
-    key = i_1 + i_2 * i_base
+def gen_prune_tables(i_1, i_2, i_base, move_table_1, move_table_2, depth_table,
+        remap=None):
+    i = remap[i_1] if remap else i_1
+    key = i + i_2 * i_base
     depth_table[key] = 0
     current = [(i_1, i_2)]
 
@@ -623,7 +683,8 @@ def gen_prune_tables(i_1, i_2, i_base, move_table_1, move_table_2, depth_table):
             [i_1, i_2] = current.pop()
 
             for [c_1, c_2] in zip(move_table_1[i_1], move_table_2[i_2]):
-                key = c_1 + c_2 * i_base
+                c = remap[c_1] if remap else c_1
+                key = c + c_2 * i_base
 
                 # Only search further if the position hasn't been found before
                 if depth_table[key] == -1:
@@ -638,8 +699,8 @@ def gen_indices():
     global ESLICE_INDEX_1
     global CORNER_EDGE_DEPTH_1, CORNER_ESLICE_DEPTH_1, EDGE_ESLICE_DEPTH_1
     global CORNER_MOVES_2, EDGE_MOVES_2, ESLICE_MOVES_2
-    global CORNER_INDEX_2, EDGE_INDEX_2, ESLICE_INDEX_2
-    global CORNER_ESLICE_DEPTH_2, EDGE_ESLICE_DEPTH_2
+    global CORNER_INDEX_2, EDGE_INDEX_2, ESLICE_INDEX_2, CCOMBP_INDEX
+    global CORNER_ESLICE_DEPTH_2, EDGE_ESLICE_DEPTH_2, CCOMBP_EDGE_DEPTH_2
 
     # See if the tables are cached on disk, and deserialize them if so
     if os.path.exists(INDEX_CACHE_PATH):
@@ -657,9 +718,9 @@ def gen_indices():
             # Phase 2 moves
             2*10*40320, 2*10*40320, 2*10*24,
             # Phase 2 index lookups
-            2*9*40320, 2*9*40320, 5*24,
+            2*9*40320, 2*9*40320, 5*24, 40320,
             # Phase 2 pruning tables
-            CORNER_ESLICE_LEN_2, EDGE_ESLICE_LEN_2,
+            CORNER_ESLICE_LEN_2, EDGE_ESLICE_LEN_2, CCOMBP_EDGE_LEN_2,
         ]
 
         chunks = []
@@ -668,6 +729,10 @@ def gen_indices():
             chunks.append(data[:l])
             data = data[l:]
         assert not data, len(data)
+
+        [c_m_1, e_m_1, s_m_1, s_i_1, c_e_d_1, c_s_d_1, e_s_d_1,
+                c_m_2, e_m_2, s_m_2, c_i_2, e_i_2, s_i_2, cc_i_2,
+                c_s_d_2, e_s_d_2, c_e_d_2] = chunks
 
         # Helper to create an array of the given type from the given data,
         # splitting it into sublists of a given length if requested
@@ -683,9 +748,6 @@ def gen_indices():
         def make_index(t, l, c, tp='H'):
             t = make(tp, t)
             return {tuple(t[i:i+c-1]): t[i+c-1] for i in range(0, c*l, c)}
-
-        [c_m_1, e_m_1, s_m_1, s_i_1, c_e_d_1, c_s_d_1, e_s_d_1,
-                c_m_2, e_m_2, s_m_2, c_i_2, e_i_2, s_i_2, c_s_d_2, e_s_d_2] = chunks
 
         CORNER_MOVES_1 = make('H', c_m_1, split=18)
         EDGE_MOVES_1 = make('H', e_m_1, split=18)
@@ -705,8 +767,11 @@ def gen_indices():
         EDGE_INDEX_2 = make_index(e_i_2, 40320, 9)
         ESLICE_INDEX_2 = make_index(s_i_2, 24, 5, tp='B')
 
+        CCOMBP_INDEX = make('b', cc_i_2)
+
         CORNER_ESLICE_DEPTH_2 = make('b', c_s_d_2)
         EDGE_ESLICE_DEPTH_2 = make('b', e_s_d_2)
+        CCOMBP_EDGE_DEPTH_2 = make('b', c_e_d_2)
 
         return
 
@@ -727,6 +792,8 @@ def gen_indices():
     gen_move_tables(get_eslice_sparse_index_2, phase_2_moves, ESLICE_MOVES_2,
             index_table=ESLICE_INDEX_2)
 
+    gen_ccomb_indices()
+
     gen_prune_tables(SOLVED_C_1, SOLVED_E_1, 2187, CORNER_MOVES_1, EDGE_MOVES_1,
             CORNER_EDGE_DEPTH_1)
     gen_prune_tables(SOLVED_C_1, SOLVED_S_1, 2187, CORNER_MOVES_1, ESLICE_MOVES_1,
@@ -738,6 +805,8 @@ def gen_indices():
             CORNER_ESLICE_DEPTH_2)
     gen_prune_tables(SOLVED_E_2, SOLVED_S_2, 40320, EDGE_MOVES_2, ESLICE_MOVES_2,
             EDGE_ESLICE_DEPTH_2)
+    gen_prune_tables(SOLVED_C_2, SOLVED_E_2, 140, CORNER_MOVES_2, EDGE_MOVES_2,
+            CCOMBP_EDGE_DEPTH_2, remap=CCOMBP_INDEX)
 
     # Write the generated tables to disk
     with open(INDEX_CACHE_PATH, 'wb') as f:
@@ -767,10 +836,13 @@ def gen_indices():
                 for [k, v] in EDGE_INDEX_2.items()]))
         s_i_2 = array.array('B', flatten([[*k, v]
                 for [k, v] in ESLICE_INDEX_2.items()]))
+        cc_i_2 = array.array('B', CCOMBP_INDEX)
         f.write(moves_2.tobytes())
         f.write(c_i_2.tobytes() + e_i_2.tobytes() + s_i_2.tobytes())
+        f.write(cc_i_2.tobytes())
         f.write(CORNER_ESLICE_DEPTH_2.tobytes())
         f.write(EDGE_ESLICE_DEPTH_2.tobytes())
+        f.write(CCOMBP_EDGE_DEPTH_2.tobytes())
 
 gen_indices()
 
@@ -857,20 +929,14 @@ def phase_2(ctx, c, e, s, last_face, moves_1, moves_2, depth):
         # Prune the search if this move leads to a position needing too many
         # moves to solve
         if (CORNER_ESLICE_DEPTH_2[c_n + 40320*s_n] >= depth or
-                EDGE_ESLICE_DEPTH_2[e_n + 40320*s_n] >= depth):
+                EDGE_ESLICE_DEPTH_2[e_n + 40320*s_n] >= depth or
+                CCOMBP_EDGE_DEPTH_2[CCOMBP_INDEX[c_n] + 140*e_n] >= depth):
             continue
 
         if phase_2(ctx, c_n, e_n, s_n, face, moves_1, moves_2 + [m], depth - 1):
             return True
 
     return False
-
-def get_parity(index, n):
-    parity = 0
-    for i in range(2, n + 1):
-        [index, m] = divmod(index, i)
-        parity ^= m
-    return parity & 1
 
 # Random state scramble generator
 def gen_random_state_scramble():
@@ -882,28 +948,6 @@ def gen_random_state_scramble():
         ep = random.randrange(FACTORIAL[12])
         if get_parity(cp, 8) == get_parity(ep, 12):
             break
-
-    # Permute and orient a piece set (corners or edges). This pulls pieces from
-    # the <solved> list according to the <perm> number, then orients them
-    # according to the <orient> number. This works over <n> pieces with <r>
-    # possible orientations each.
-    def permute_orient(result, solved, orient, perm, n, r):
-        result = [None] * n
-        # Copy to a mutable list so we can pull items out when permuting
-        solved = list(solved)
-        # Permute
-        for i in range(n):
-            [d, perm] = divmod(perm, FACTORIAL[n - i - 1])
-            result[i] = solved.pop(d)
-        # Orient
-        total = 0
-        for i in range(n - 1):
-            [orient, d] = divmod(orient, r)
-            result[i] = rotate(result[i], d)
-            total += d
-        # Orient the last piece so the total orientation is 0 modulo r
-        result[n - 1] = rotate(result[n - 1], -total % r)
-        return result
 
     corners = permute_orient(SOLVED_CUBE.corners, co, cp, 8, 3)
     edges = permute_orient(SOLVED_CUBE.edges, eo, ep, 12, 2)
