@@ -852,8 +852,16 @@ class SolverContext:
         self.nodes = 0
         self.max_depth = 1000
         self.initial_cube = None
+        self.remap = None
         self.solution_cache = set()
         self.best_solution = None
+        self.best_remap = None
+
+    def set_best(self, moves_1, moves_2):
+        self.best_solution = [moves_1, moves_2]
+        self.best_remap = self.remap
+        # Set overall max depth so we only try to find solutions shorted than this
+        self.max_depth = len(moves_1) + len(moves_2)
 
 # Phase 1 recursive search
 def phase_1(ctx, c, e, s, last_face, moves, depth):
@@ -910,9 +918,7 @@ def phase_2(ctx, c, e, s, last_face, moves_1, moves_2, depth):
     ctx.nodes += 1
     # See if we've solved phase 2
     if (c, e, s) == SOLVED_INDICES_2:
-        ctx.best_solution = [moves_1, moves_2]
-        # Set overall max depth so we only try to find solutions shorted than this
-        ctx.max_depth = len(moves_1) + len(moves_2)
+        ctx.set_best(moves_1, moves_2)
         return True
     if depth == 0:
         return False
@@ -952,19 +958,41 @@ def gen_random_state_scramble():
     corners = permute_orient(SOLVED_CUBE.corners, co, cp, 8, 3)
     edges = permute_orient(SOLVED_CUBE.edges, eo, ep, 12, 2)
 
-    cube = Cube(corners=tuple(corners), edges=tuple(edges))
-    ctx = SolverContext()
-    ctx.initial_cube = cube
-    c = get_corner_index_1(cube)
-    e = get_edge_index_1(cube)
-    s = get_eslice_index_1(cube)
+    # Set up cubes to solve to G1 along each axis. The typical Kociemba algorithm
+    # first solves the cube into <U,D,R2,L2,F2,B2>, but we also rotate the cube
+    # and remap colors to solve to <U2,D2,R,L,F2,B2> and <U2,D2,R2,L2,F,B>.
+    cubes = []
+    for [alg, remap] in [['', range(6)], ['x', RX], ['z', RZ]]:
+        cube = Cube(corners=tuple(corners), edges=tuple(edges))
+        cube.run_alg(alg)
+        cube.corners = tuple(tuple(remap[f] for f in c) for c in cube.corners)
+        cube.edges = tuple(tuple(remap[f] for f in c) for c in cube.edges)
 
-    # Main iterative deepening search loop
+        c = get_corner_index_1(cube)
+        e = get_edge_index_1(cube)
+        s = get_eslice_index_1(cube)
+
+        cubes.append((cube, c, e, s, remap))
+
+    ctx = SolverContext()
+    t = time.time()
+    # Main iterative deepening search loop. We interleave searches along all the
+    # axes so that if we find a solution of length N on one axis, we can limit
+    # the depth on all axes to N-1.
     for depth in range(1, 20):
-        if phase_1(ctx, c, e, s, None, [], depth):
+        for [cube, c, e, s, remap] in cubes:
+            ctx.initial_cube = cube
+            ctx.remap = remap
+            if phase_1(ctx, c, e, s, None, [], depth):
+                break
+        if ctx.probes > MAX_PROBES:
             break
 
-    # Assemble the final scramble by inverting the best phase 1/2 moves
+    # Take best solution and remap faces to match the normal cube
     [m_1, m_2] = ctx.best_solution
     moves = [PHASE_1_MOVES[i] for i in m_1] + [PHASE_2_MOVES[i] for i in m_2]
-    return invert_alg(' '.join(moves)).split()
+    alg = invert_alg(' '.join(moves))
+
+    trans = str.maketrans(''.join(FACE_STR[ctx.best_remap[i]]
+            for i in range(6)), FACE_STR)
+    return alg.translate(trans).split()
