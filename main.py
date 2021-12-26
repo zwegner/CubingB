@@ -903,6 +903,7 @@ class ScrambleWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
         self.scramble = None
+        self.diagram_size = 100
 
         self.resize(48)
 
@@ -916,12 +917,13 @@ class ScrambleWidget(QLabel):
 
     def resize(self, size):
         self.setStyleSheet('font: %spx Courier;' % size)
+        self.diagram_size = int(size * 2.0)
 
     def hover_move(self, link):
         if link:
             scramble = self.scramble[:int(link) + 1]
             self.scramble_popup.set_scramble(scramble)
-            text = ' '.join(self.scramble_popup.get_b64_pics(100, 10))
+            text = ' '.join(self.scramble_popup.get_b64_pics(self.diagram_size, 10))
             QToolTip.showText(QCursor.pos(), text)
 
     def set_scramble(self, scramble, scramble_left):
