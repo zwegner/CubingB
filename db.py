@@ -76,7 +76,8 @@ class Session(Base, NiceBase):
     __tablename__ = 'sessions'
     sort_id = Column(Integer)
     name = Column(String(128))
-    scramble_type = Column(String(64))
+    puzzle_type = Column(String(64))
+    scramble_type = Column(Integer, default=0)
     notify_every_n_solves = Column(Integer)
     cached_stats_current = Column(JSON)
     cached_stats_best = Column(JSON)

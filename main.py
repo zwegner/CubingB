@@ -54,6 +54,9 @@ WINDOW_SIZE = [1600, 1000]
 Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK ALG_TRAIN ALG_VIEW', start=0)
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
         'SMART_SCRAMBLED SMART_SOLVING')
+ScrambleType = enum.IntEnum('ScrambleType', 'RANDOM_STATE RANDOM_MOVES '
+        'ENTER_SCRAMBLE HAND_SCRAMBLE', start=0)
+SCRAMBLE_TYPES = ['Random state', 'Random Moves', 'Enter scramble', 'Hand Scramble']
 
 SCRAMBLE_MOVES = 25
 
@@ -120,6 +123,7 @@ class CubeWindow(QMainWindow):
         self.pending_timer = None
         self.smart_device = None
         self.mode = None
+        self.cached_scramble = None
 
         # Initialize DB and make sure there's a current session
         db.init_db(config.DB_PATH)
@@ -127,7 +131,7 @@ class CubeWindow(QMainWindow):
             settings = session.upsert(db.Settings, {})
             if not settings.current_session:
                 sesh = session.insert(db.Session, name='New Session',
-                        scramble_type='3x3')
+                        puzzle_type='3x3')
                 settings.current_session = sesh
 
         # Create basic layout/widgets. We do this first because the various
@@ -288,8 +292,11 @@ class CubeWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_R:
             self.reset()
         elif event.key() == Qt.Key.Key_Space and self.state == State.SCRAMBLE:
-            self.state = State.SOLVE_PENDING
-            self.start_pending()
+            if self.scramble is not None:
+                self.state = State.SOLVE_PENDING
+                self.start_pending()
+            else:
+                self.gen_scramble()
         elif event.key() == Qt.Key.Key_Escape and self.state == State.SOLVE_PENDING:
             self.state = State.SCRAMBLE
             self.stop_pending(False)
@@ -415,9 +422,28 @@ class CubeWindow(QMainWindow):
         self.start_time = None
         self.end_time = None
 
-        self.scramble = solver.gen_random_state_scramble()
+        self.scramble = None
+        type = self.session_widget.scramble_type
+        if type == ScrambleType.RANDOM_STATE:
+            if not self.cached_scramble:
+                self.cached_scramble = solver.gen_random_state_scramble()
+            self.scramble = self.cached_scramble
+        elif type == ScrambleType.RANDOM_MOVES:
+            self.scramble = solver.gen_random_move_scramble(SCRAMBLE_MOVES)
+        elif type == ScrambleType.ENTER_SCRAMBLE:
+            [scramble, ok] = QInputDialog.getText(self, 'Enter scramble',
+                    'Enter scramble:')
+            if ok:
+                scramble = scramble.split()
+                if solver.validate_scramble(scramble):
+                    self.scramble = scramble
+        elif type == ScrambleType.HAND_SCRAMBLE:
+            self.scramble = []
 
-        self.scramble_left = self.scramble[:]
+        if self.scramble:
+            self.scramble_left = self.scramble[:]
+        else:
+            self.scramble_left = []
 
         self.mark_scramble_changed()
 
@@ -467,6 +493,7 @@ class CubeWindow(QMainWindow):
                     time_ms=int(final_time * 1000), dnf=dnf,
                     smart_data_raw=data)
 
+        self.cached_scramble = None
         self.gen_scramble()
         return final_time
 
@@ -927,6 +954,14 @@ class ScrambleWidget(QLabel):
             QToolTip.showText(QCursor.pos(), text)
 
     def set_scramble(self, scramble, scramble_left):
+        if not scramble:
+            if scramble is None:
+                self.setText('No scramble.')
+            else:
+                self.setText('Scramble by hand now.')
+            self.update()
+            return
+
         self.scramble = scramble
         offset = max(len(scramble) - len(scramble_left), 0)
         left = ['-'] * len(scramble)
@@ -968,11 +1003,14 @@ class ScrambleViewWidget(QFrame):
 
     def set_scramble(self, scramble):
         cube = solver.Cube()
-        cube.run_alg(scramble)
+        if scramble:
+            cube.run_alg(scramble)
 
-        top_diag = render.gen_cube_diagram(cube)
-        bottom_diag = render.gen_cube_diagram(cube.run_alg('x2 z'),
-                transform='rotate(60)')
+            top_diag = render.gen_cube_diagram(cube)
+            bottom_diag = render.gen_cube_diagram(cube.run_alg('x2 z'),
+                    transform='rotate(60)')
+        else:
+            top_diag = bottom_diag = render.gen_cube_diagram('-' * 27)
 
         self.svg_top.load(top_diag.encode('ascii'))
         self.svg_bottom.load(bottom_diag.encode('ascii'))
@@ -1034,8 +1072,17 @@ class SessionWidget(QWidget):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
+        self.puzzle_type = QLabel('3x3')
+        self.scramble_selector = make_dropdown(SCRAMBLE_TYPES,
+                change=self.change_scramble_type)
+        self.scramble_type = ScrambleType.RANDOM_STATE
+        attributes = QWidget(self)
+        make_hbox(attributes, [QLabel('Puzzle:'), self.puzzle_type,
+                QLabel('Scramble:'), self.scramble_selector])
+
         self.layout = make_grid(self, [
             [self.label, self.selector, new, edit],
+            [attributes],
             [self.stats],
             [self.table],
         ], stretch=[0, 1, 0, 0], margin=0)
@@ -1097,7 +1144,7 @@ class SessionWidget(QWidget):
         with db.get_session() as session:
             settings = session.upsert(db.Settings, {})
             sesh = session.insert(db.Session, name='New Session',
-                    scramble_type='3x3')
+                    puzzle_type='3x3')
             settings.current_session = sesh
             session.flush()
             self.trigger_update()
@@ -1116,6 +1163,14 @@ class SessionWidget(QWidget):
             id = self.session_ids[index]
             settings.current_session = session.query_first(db.Session, id=id)
             self.trigger_update()
+
+    def change_scramble_type(self, index):
+        with db.get_session() as session:
+            sesh = session.query_first(db.Settings).current_session
+            t = ScrambleType(index)
+            sesh.scramble_type = t
+            self.scramble_type = t
+        self.parent.gen_scramble()
 
     def set_playback_mode(self, mode):
         self.playback_mode = mode
@@ -1138,6 +1193,19 @@ class SessionWidget(QWidget):
                     if s.id == sesh.id:
                         self.selector.setCurrentIndex(len(self.session_ids) - 1)
 
+            with block_signals(self.scramble_selector):
+                t = sesh.scramble_type
+                if t is None:
+                    if sesh.puzzle_type == '3x3':
+                        t = ScrambleType.RANDOM_STATE 
+                    else:
+                        t = ScrambleType.HAND_SCRAMBLE
+                self.scramble_selector.setCurrentIndex(t)
+            self.scramble_type = t
+            self.parent.gen_scramble()
+
+            self.puzzle_type.setText(sesh.puzzle_type)
+
             # Get solves
             solves = analyze.get_session_solves(session, sesh)
 
@@ -1148,7 +1216,7 @@ class SessionWidget(QWidget):
             self.layout.removeWidget(self.stats)
             self.stats = QWidget()
             self.stats.setStyleSheet('QLabel { font: 16px; }')
-            self.layout.addWidget(self.stats, 1, 0, 1, 4)
+            self.layout.addWidget(self.stats, 2, 0, 1, 4)
 
             if self.playback_mode:
                 self.stats.hide()
@@ -1478,7 +1546,7 @@ class SessionEditorDialog(QDialog):
             self.ctx_menu.addAction(action)
 
         self.table = ReorderTableWidget(self, self.rows_reordered)
-        columns = ['Name', 'Scramble', '# Solves', 'Solve Reminder']
+        columns = ['Name', 'Puzzle', '# Solves', 'Solve Reminder']
         columns += [stat_str(stat) for stat in STAT_AO_COUNTS]
 
         set_table_columns(self.table, columns, stretch=0)
@@ -1586,8 +1654,8 @@ class SessionEditorDialog(QDialog):
                     self.table.setVerticalHeaderItem(i, cell(str(sesh_id)))
                     self.table.setItem(i, 0, cell(sesh.name, editable=True,
                             secret_data=(sesh.id, 'name')))
-                    self.table.setItem(i, 1, cell(sesh.scramble_type, editable=True,
-                            secret_data=(sesh.id, 'scramble_type')))
+                    self.table.setItem(i, 1, cell(sesh.puzzle_type, editable=True,
+                            secret_data=(sesh.id, 'puzzle_type')))
                     self.table.setItem(i, 2, cell(str(n_solves)))
                     self.table.setItem(i, 3, cell(str(sesh.notify_every_n_solves or ''),
                             editable=True,
