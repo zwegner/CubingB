@@ -70,22 +70,26 @@ class Cube:
         self.corners = corners
 
     def turn(self, face, n):
-        [self.edges, self.corners] = TURNS[face][n](self.edges, self.corners)
-
-    def rotate(self, rot, n):
-        [self.centers, self.edges, self.corners] = ROTATES[rot][n](self.centers,
+        [self.centers, self.edges, self.corners] = TURN_FN[face][n](self.centers,
                 self.edges, self.corners)
 
+    def rotate(self, rot, n):
+        [self.centers, self.edges, self.corners] = ROTATE_FN[rot][n](self.centers,
+                self.edges, self.corners)
+
+    def move(self, move):
+        [self.centers, self.edges, self.corners] = MOVE_FN[move](self.centers,
+                self.edges, self.corners)
+
+    def reorient(self):
+        [self.centers, self.edges, self.corners] = REORIENT_FN[self.centers](
+                self.centers, self.edges, self.corners)
+
     def run_alg(self, alg):
-        if isinstance(alg, (str, list)):
-            alg = parse_alg(alg)
-        for [rot, rn, r, n, r2, n2] in alg:
-            if rot is not None:
-                self.rotate(rot, rn)
-            if r is not None:
-                self.turn(r, n)
-            if r2 is not None:
-                self.turn(r2, n2)
+        if isinstance(alg, str):
+            alg = alg.split()
+        for move in alg:
+            self.move(move)
         return self
 
     def __eq__(self, other):
@@ -97,7 +101,18 @@ class Cube:
     def copy(self):
         return Cube(self.centers, self.edges, self.corners)
 
-def rotate(l, n):
+SOLVED_CUBE = Cube()
+
+def move_str(face, turn):
+    return FACE_STR[face] + TURN_STR[turn]
+
+def rot_str(axis, turn):
+    return ROTATE_STR[axis] + TURN_STR[turn]
+
+def slice_str(axis, turn):
+    return SLICE_STR[axis] + TURN_STR[turn]
+
+def rotate_right(l, n):
     return (*l[-n:], *l[:-n])
 
 def find_shift(l, i):
@@ -105,112 +120,173 @@ def find_shift(l, i):
     for s in range(len(i)):
         if i in l:
             return (l.index(i), s)
-        i = rotate(i, 1)
+        i = rotate_right(i, 1)
     assert 0, (l, ii)
 
-# Metabrogramming. Generate function for each of the turn and rotate moves.
-# This is pretty messy code, just the first random crap I hacked up that worked
-TURNS = []
-ROTATES = []
+# To speed up normal cube operations (like turning a face or rotating the cube),
+# we do some metaprogramming to build a transformation function. This creates a
+# function that does whatever permutation/orientation it takes to transform the
+# source cube to the target cube.
+def build_transform_fn(name, target, source=SOLVED_CUBE):
+    corner_idxs = []
+    for corner in target.corners:
+        # Find where this corner is on a solved cube
+        [c, f] = find_shift(source.corners, corner)
+        if f == 0:
+            corner_idxs.append('c[%s]' % (c))
+        else:
+            [x, y, z] = [(i + f) % 3 for i in range(3)]
+            corner_idxs.append('(c[%s][%s], c[%s][%s], c[%s][%s])' % (c, x, c, y, c, z))
+
+    edge_idxs = []
+    for edge in target.edges:
+        # Find where this edge is on a solved cube
+        [e, f] = find_shift(source.edges, edge)
+
+        if f == 0:
+            edge_idxs.append('e[%s]' % e)
+        else:
+            edge_idxs.append('(e[%s][1], e[%s][0])' % (e, e))
+
+    # If this is a move that changes centers, build a permutation for that too
+    center_idxs = 'cn'
+    if source.centers != target.centers:
+        center_idxs = ['cn[%s]' % source.centers.index(f) for f in target.centers]
+        center_idxs = '(%s)' % ', '.join(center_idxs)
+
+    code = '''
+def {name}(cn, e, c):
+    return ({cn}, ({i}), ({c}))'''.format(name=name,
+        cn=center_idxs, i=', '.join(edge_idxs), c=', '.join(corner_idxs))
+    ctx = {}
+    exec(code, ctx)
+    return ctx[name]
+
+# Generate functions for face turn, rotations, wide/slice moves, and reorienting
+TURN_FN = []
+ROTATE_FN = []
+MOVE_FN = {}
+MOVE_COMPONENTS = {}
+REORIENT_FN = {}
 def gen_turns():
-    for F in range(6):
-        FR = {}
-        TURNS.append(FR)
-        face = faces[F]
+    # Helper to add a function to the move table. We also add the move under
+    # some aliases so we can support stuff like R3 and R2'. And we store the
+    # move components, i.e. the one or two face turns that make up the move
+    # without considering orientation (like M' -> R' L)
+    def add_move(s, fn, face_1=None, face_2=None):
+        moves = {s, s.replace('2', "2'"), s.replace("'", '3')}
+        for move in moves:
+            MOVE_FN[move] = fn
+            [f1, t1] = face_1 if face_1 else (None, None)
+            [f2, t2] = face_2 if face_2 else (None, None)
+            MOVE_COMPONENTS[move] = (f1, t1, f2, t2)
+
+    # Build turn functions for each face
+    for face in range(6):
+        table = {}
+        TURN_FN.append(table)
         for n in range(1, 4):
-            E = list(range(1, 13))
-            C = [(x, 0) for x in range(8)]
-            [idx, flip, cidx, cflip] = face
-            edges = [E[i] for i in idx]
-            new_edges = edges[n:] + edges[:n]
-            new_flip = flip[n:] + flip[:n]
+            # Get the corners and edges on this face, along with their orientation
+            [idx, flip, cidx, cflip] = faces[face]
+
+            # Rotate corners
+            corners = list(CORNERS)
+            new_corners = rotate_right(cidx, n)
+            new_cflip = rotate_right(cflip, n)
+            for [i, c, f, nf] in zip(cidx, new_corners, cflip, new_cflip):
+                corners[i] = rotate_right(CORNERS[c], (f - nf) % 3)
+
+            # Rotate edges
+            edges = list(EDGES)
+            new_edges = rotate_right(idx, n)
+            new_flip = rotate_right(flip, n)
             for [i, e, f, nf] in zip(idx, new_edges, flip, new_flip):
-                if f != nf:
-                    e = -e
-                E[i] = e
+                edges[i] = rotate_right(EDGES[e], (f - nf) % 2) 
 
-            corners = [C[i] for i in cidx]
-            new_corners = corners[n:] + corners[:n]
-            new_cflip = cflip[n:] + cflip[:n]
-            for [i, [c, _], f, nf] in zip(cidx, new_corners, cflip, new_cflip):
-                df = 0
-                C[i] = (c, (nf-f)%3)
+            cube = Cube(corners=corners, edges=edges)
 
-            idxs = []
-            for e in E:
-                if e > 0:
-                    idxs.append('e[%s]' % (e-1))
-                else:
-                    e = -e - 1
-                    idxs.append('(e[%s][1], e[%s][0])' % (e, e))
+            name = 'turn_%s_%s' % (FACE_STR[face], n)
+            fn = build_transform_fn(name, cube)
+            table[n] = fn
+            move = move_str(face, n)
+            add_move(move_str(face, n), fn, face_1=(face, n))
 
-            cidxs = []
-            for [c, f] in C:
-                if f == 0:
-                    cidxs.append('c[%s]' % (c))
-                else:
-                    [x, y, z] = [(i + f) % 3 for i in range(3)]
-                    cidxs.append('(c[%s][%s], c[%s][%s], c[%s][%s])' % (c, x, c, y, c, z))
-
-            name = 'turn_%s_%s' % (FACE_STR[F], n)
-            code = '''
-def {name}(e, c):
-    return (({i}),
-        ({c}))'''.format(name=name, i=', '.join(idxs), c=', '.join(cidxs))
-            ctx = {}
-            exec(code, ctx)
-            FR[4 - n] = ctx[name]
-
+    # Build rotation functions for each axis
     for [r, rotation] in enumerate(ROTATE_FACES):
-        FR = {}
-        ROTATES.append(FR)
+        table = {}
+        ROTATE_FN.append(table)
         for n in range(1, 4):
+            # Find color scheme remapping for this rotation
             rot = list(range(6))
             for i in range(n):
                 rot = [rot[x] for x in rotation]
-            E = []
-            C = []
-            for [a, b] in EDGES:
-                edge = (rot[a], rot[b])
-                E.append(find_shift(EDGES, edge))
+
+            # Build cube by remapping colors
+            corners = []
             for [a, b, c] in CORNERS:
-                corner = (rot[a], rot[b], rot[c])
-                C.append(find_shift(CORNERS, corner))
-
-            cnidxs = ['cn[%s]' % f for f in rot]
-
-            idxs = []
-            for [e, f] in E:
-                if f == 0:
-                    idxs.append('e[%s]' % (e))
-                else:
-                    idxs.append('(e[%s][1], e[%s][0])' % (e, e))
-
-            cidxs = []
-            for [c, f] in C:
-                if f == 0:
-                    cidxs.append('c[%s]' % (c))
-                else:
-                    [x, y, z] = [(i + f) % 3 for i in range(3)]
-                    cidxs.append('(c[%s][%s], c[%s][%s], c[%s][%s])' % (c, x, c, y, c, z))
+                corners.append((rot[a], rot[b], rot[c]))
+            edges = []
+            for [a, b] in EDGES:
+                edges.append((rot[a], rot[b]))
+            cube = Cube(corners=corners, edges=edges, centers=rot)
 
             name = 'rotate_%s_%s' % (ROTATE_STR[r], n)
-            code = '''
-def {name}(cn, e, c):
-    return (({cn}),
-        ({i}),
-        ({c}))'''.format(name=name, cn=', '.join(cnidxs), i=', '.join(idxs), c=', '.join(cidxs))
-            ctx = {}
-            exec(code, ctx)
-            FR[4 - n] = ctx[name]
+            fn = build_transform_fn(name, cube)
+            table[4 - n] = fn
+            move = rot_str(r, 4 - n)
+            add_move(move, fn)
+
+    # Generate wide moves by combining a rotation and face turn
+    for face in range(6):
+        for n in range(1, 4):
+            rot = face >> 1
+            rn = n
+            if face & 1:
+                rn = 4 - n
+            cube = Cube()
+            cube.rotate(rot, rn)
+            cube.turn(face ^ 1, n)
+
+            name = 'wide_%s_%s' % (FACE_STR[face], n)
+            move = move_str(face, n).lower()
+            add_move(move, build_transform_fn(name, cube), face_1=(face ^ 1, n))
+
+    # Generate slice moves by combining a rotation and two face turns
+    for axis in range(3):
+        for n in range(1, 4):
+            rn = n
+            if SLICE_ROT_FLIP[axis]:
+                rn = 4 - rn
+            face = axis * 2
+            cube = Cube()
+            cube.rotate(axis, rn)
+            cube.turn(face, 4 - rn)
+            cube.turn(face + 1, rn)
+
+            name = 'slice_%s_%s' % (SLICE_STR[axis], n)
+            move = slice_str(axis, n)
+            add_move(move, build_transform_fn(name, cube), face_1=(face, 4 - rn),
+                    face_2=(face + 1, rn))
+
+    # Generate reorientation moves: for a given orientation, rotate back to the
+    # standard white top, green front. We just index by the center tuple since
+    # why not.
+    cube = Cube()
+    for r1 in ['', 'x', 'x', 'x', 'x z', 'z2']:
+        cube.run_alg(r1)
+        for r2 in ['', 'y', 'y2', "y'"]:
+            c = cube.copy()
+            c.run_alg(r2)
+            # Use the rotated cube as the source for this transform, i.e. we're
+            # transforming the rotated cube to oriented
+            REORIENT_FN[c.centers] = build_transform_fn('reorient', SOLVED_CUBE,
+                    source=c)
 
 gen_turns()
 
 ################################################################################
 ## CFOP logic helpers ##########################################################
 ################################################################################
-
-SOLVED_CUBE = Cube()
 
 # Create CFOP tables the lazy way
 
@@ -263,103 +339,14 @@ def is_oll_solved(cube, cross_color):
 ## Utilities ###################################################################
 ################################################################################
 
-def move_str(face, turn):
-    return FACE_STR[face] + TURN_STR[turn]
-
 def parse_move(move):
     return (INV_FACE_STR[move[0]], INV_TURN_STR[move[1:]])
 
-def parse_rot(m):
-    m = m.replace("2'", '2')
-    if m.endswith("'"):
-        return 3
-    elif m.endswith('2'):
-        return 2
-    # E.g. a Ub perm alg has R3 in it
-    elif m.endswith('3'):
-        return 3
-    return 1
-
-def parse_alg(alg):
-    if isinstance(alg, list):
-        alg = ' '.join(alg)
-
+def invert_alg(alg):
     moves = []
-
-    for move in alg.split():
-        rot = rn = face = n = f2 = n2 = None
-
-        if move[0].upper() in FACE_STR:
-            face = FACE_STR.index(move[0].upper())
-            n = parse_rot(move)
-            # Wide moves: just rotate our representation, and flip the face
-            if move[0].islower():
-                rot = face >> 1
-                rn = n
-                if face & 1:
-                    rn = 4 - n
-                face ^= 1
-
-        elif move[0] in ROTATE_STR:
-            rot = ROTATE_STR.index(move[0])
-            rn = parse_rot(move)
-
-        elif move[0] in SLICE_STR:
-            rot = SLICE_STR.index(move[0])
-            rn = parse_rot(move)
-            if SLICE_ROT_FLIP[rot]:
-                rn = 4 - rn
-            face = rot * 2
-            n = 4 - rn
-            f2 = face + 1
-            n2 = rn
-        else:
-            assert 0, move
-
-        moves.append((rot, rn, face, n, f2, n2))
-    return moves
-
-# Parse all the rotation moves in an alg, including slice/wide moves (which
-# change the orientation of centers), and return a list of just the
-# rotations. For example, M2 y U f -> x2 y z
-def get_alg_rotations(alg):
-    moves = []
-    for move in alg.split():
-        rot = rn = None
-        if move[0].islower() and move[0].upper() in FACE_STR:
-            face = FACE_STR.index(move[0].upper())
-            rot = face >> 1
-            rn = parse_rot(move)
-            if face & 1:
-                rn = 4 - rn
-
-        elif move[0] in ROTATE_STR:
-            rot = ROTATE_STR.index(move[0])
-            rn = parse_rot(move)
-
-        elif move[0] in SLICE_STR:
-            rot = SLICE_STR.index(move[0])
-            rn = parse_rot(move)
-            if SLICE_ROT_FLIP[rot]:
-                rn = 4 - rn
-
-        if rot is not None:
-            moves.append(ROTATE_STR[rot] + TURN_STR[rn])
-    return moves
-
-def invert_alg(alg, cancel_rotations=False):
-    moves = []
-
-    # If we're cancelling rotations, we pull out all the rotations in the given
-    # alg apply them at the beginning. Since all the other moves are getting
-    # inverted, these cancel out, so the cube will start and end in the same
-    # orientation.
-    if cancel_rotations:
-        moves = get_alg_rotations(alg)
-
+    INV_TURN = {'': "'", "'": '', '2': '2': "2'": '2', '3': ''}
     for m in reversed(alg.split()):
-        turn = parse_rot(m[1:])
-        moves.append(m[0] + TURN_STR[4 - turn])
+        moves.append(m[0] + INV_TURN[m[1:]])
     return ' '.join(moves)
 
 def gen_random_move_scramble():

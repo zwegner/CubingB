@@ -673,8 +673,7 @@ class AlgTrainer(QWidget):
                 if alg_moves[0].startswith('y'):
                     alg_moves.pop(0)
                 for move in alg_moves:
-                    [m] = solver.parse_alg(move)
-                    [_, _, f1, t1, f2, t2] = m
+                    [f1, t1, f2, t2] = solver.MOVE_COMPONENTS[move]
                     if f1 is not None:
                         moves.append((cube.centers[f1], t1))
                         if f2 is not None:
@@ -755,11 +754,9 @@ class AlgTrainer(QWidget):
         moves = '%s %s %s' % (random.choice(AUFS), moves,
                 random.choice(AUFS))
 
-        # Invert moves
-        moves = solver.invert_alg(moves, cancel_rotations=True)
-
-        # Run the inverse algorithm on the cube
-        self.cube.run_alg(moves)
+        # Run the inverse algorithm on the cube, then reorient
+        self.cube.run_alg(solver.invert_alg(moves))
+        self.cube.reorient()
 
     def reset(self):
         self.current_moves = []
