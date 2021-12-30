@@ -134,6 +134,14 @@ def make_tabs(*tabs, change=None):
         tab_bar.currentChanged.connect(change)
     return tab_bar
 
+def make_dropdown(items, change=None):
+    combo = QComboBox()
+    for t in items:
+        combo.addItem(t)
+    if change:
+        combo.currentIndexChanged.connect(change)
+    return combo
+
 # Set the column headers for a table.
 # The hacky 'stretch' parameter will stretch all columns if it's negative, or a
 # single column of the given id if nonnegative

@@ -28,7 +28,7 @@ import time
 
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
-from PyQt5.QtWidgets import (QLabel, QComboBox, QDialog, QDialogButtonBox,
+from PyQt5.QtWidgets import (QLabel, QDialog, QDialogButtonBox,
         QWidget, QSizePolicy, QScrollArea, QTableWidget, QPushButton,
         QCheckBox)
 from PyQt5.QtSvg import QSvgWidget
@@ -910,20 +910,15 @@ class GraphDialog(QDialog):
         from matplotlib.figure import Figure
 
         select_label = QLabel('Graph Type:')
-        self.selector = QComboBox()
-        for t in GRAPH_TYPES:
-            self.selector.addItem(t)
-        self.selector.currentIndexChanged.connect(self.change_type)
+        self.selector = make_dropdown(GRAPH_TYPES, change=self.change_type)
 
         session_button = QPushButton('Select sessions...')
         session_button.clicked.connect(self.change_sessions)
         self.session_selector = SessionSelectorDialog(self)
 
         stat_label = QLabel('Stat:')
-        self.stat_selector = QComboBox()
-        for s in STAT_AO_COUNTS:
-            self.stat_selector.addItem(stat_str(s))
-        self.stat_selector.currentIndexChanged.connect(self.change_stat)
+        self.stat_selector = make_dropdown([stat_str(s) for s in STAT_AO_COUNTS],
+                change=self.change_stat)
 
         record_cb = QCheckBox('Only records')
         record_cb.setChecked(False)

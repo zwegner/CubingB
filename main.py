@@ -32,7 +32,7 @@ from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
         QVariantAnimation, QBuffer, QByteArray, QPoint)
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget,
         QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
-        QComboBox, QDialog, QDialogButtonBox, QAbstractItemView, QFrame,
+        QDialog, QDialogButtonBox, QAbstractItemView, QFrame,
         QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog, QMenu,
         QAction, QPlainTextEdit, QToolTip)
 from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
@@ -1009,8 +1009,7 @@ class SessionWidget(QWidget):
 
         self.label = QLabel('Session:')
         self.label.setStyleSheet('font: 18px; font-weight: bold;')
-        self.selector = QComboBox()
-        self.selector.currentIndexChanged.connect(self.change_session)
+        self.selector = make_dropdown([], change=self.change_session)
         new_icon = QIcon('rsrc/material/add_black_24dp.svg')
         new = QPushButton(new_icon, '')
         new.setStyleSheet('border: none; max-width: 20px;')
