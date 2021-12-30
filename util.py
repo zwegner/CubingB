@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
 
 INF = float('+inf')
 
-STAT_AO_COUNTS = [1, 5, 12, 25, 50, 100, 200, 500, 1000]
+STAT_AO_COUNTS = [1, 3, 5, 12, 25, 50, 100, 200, 500, 1000]
 
 # Stat helpers
 
@@ -40,6 +40,8 @@ def time_execution(label):
 def stat_str(size):
     if size == 1:
         return 'single'
+    elif size < 5:
+        return 'mo%s' % size
     else:
         return 'ao%s' % size
 

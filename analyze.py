@@ -56,7 +56,7 @@ def calc_ao(all_times, start, size):
         mean = None
     else:
         times = all_times[start:start+size]
-        if size > 1:
+        if size >= 5:
             times.sort()
             outliers = (size * STAT_OUTLIER_PCT + 99) // 100
             times = times[outliers:-outliers]
@@ -65,7 +65,7 @@ def calc_ao(all_times, start, size):
     return mean
 
 def get_ao_str(solves, start, size):
-    if len(solves) - start < size or size == 1:
+    if len(solves) - start < size or size < 5:
         return ''
     solves = solves[start:start+size]
     times = [(solve_time(s), s.id) for s in solves]
@@ -211,13 +211,15 @@ def calc_session_stats(sesh, solves):
             best_id = None
 
             averages = None
-            if size > 1:
+            if size >= 5:
                 averages = iter(calc_rolling_ao(solves,
                         all_times, size))
 
             for i in range(len(solves)):
-                if size > 1:
+                if size >= 5:
                     m = next(averages)
+                elif size > 1:
+                    m = calc_ao(all_times, i, size)
                 else:
                     m = all_times[i]
 
