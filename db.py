@@ -120,6 +120,8 @@ class Algorithm(Base, NiceBase):
     known = Column(Boolean, default=False)
     ignore = Column(Boolean, default=False)
 
+Index('alg_case_idx', Algorithm.alg_case_id)
+
 class AlgExecution(Base, NiceBase):
     __tablename__ = 'alg_execs'
     alg_id = Column(Integer, ForeignKey(Algorithm.id))
