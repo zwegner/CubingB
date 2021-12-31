@@ -1055,17 +1055,22 @@ class GraphDialog(QDialog):
         if event.step > 0:
             scale = 1 / scale
 
-        [cx, cy] = [event.xdata, event.ydata]
+        # Get x and y position of the scroll event in the coordinates of the
+        # data. We'd usually use event.xdata/.ydata, but that is only valid
+        # when scrolling inside the axis
+        [cx, cy] = self.plot.transData.inverted().transform([event.x, event.y])
 
         [left, right] = self.plot.get_xlim()
-        left = max(self.left_limit, cx - scale * (cx - left))
-        right = min(self.right_limit, cx + scale * (right - cx))
-        self.plot.set_xlim(left, right)
+        if left <= cx <= right:
+            left = max(self.left_limit, cx - scale * (cx - left))
+            right = min(self.right_limit, cx + scale * (right - cx))
+            self.plot.set_xlim(left, right)
 
         [bottom, top] = self.plot.get_ylim()
-        bottom = max(self.bottom_limit, cy - scale * (cy - bottom))
-        top = min(self.top_limit, cy + scale * (top - cy))
-        self.plot.set_ylim(bottom, top)
+        if bottom <= cy <= top:
+            bottom = max(self.bottom_limit, cy - scale * (cy - bottom))
+            top = min(self.top_limit, cy + scale * (top - cy))
+            self.plot.set_ylim(bottom, top)
 
         self.figure.canvas.draw_idle()
 
