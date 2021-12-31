@@ -60,7 +60,7 @@ SCRAMBLE_TYPES = ['Random state', 'Random Moves', 'Enter scramble', 'Hand Scramb
 
 SCRAMBLE_MOVES = 25
 
-TIMER_DEBOUNCE = .5
+TIMER_DEBOUNCE = .3
 
 # Basic header to support future metadata/versioning/etc for smart data
 SMART_DATA_VERSION = 2
@@ -302,9 +302,19 @@ class CubeWindow(QMainWindow):
             self.stop_pending(False)
         # Any key stops a solve
         elif self.state == State.SOLVING:
-            self.state = State.SCRAMBLE
-            final_time = self.stop_solve(dnf=event.key() == Qt.Key.Key_Escape)
-            self.stop_solve_ui(final_time)
+            # Check if the debounce time has been met. If a key is hit too soon
+            # after a solve starts, we don't count it. Additionally, if that key
+            # is the spacebar, go back into solve pending mode. Otherwise, we
+            # just ignore the key press.
+            if time.time() - self.start_time < TIMER_DEBOUNCE:
+                if event.key() == Qt.Key.Key_Space:
+                    self.state = State.SOLVE_PENDING
+                    self.start_pending()
+                    self.stop_solve_ui(0, notify=False)
+            else:
+                self.state = State.SCRAMBLE
+                final_time = self.stop_solve(dnf=event.key() == Qt.Key.Key_Escape)
+                self.stop_solve_ui(final_time)
         # Escape can DNF a smart solve
         elif event.key() == Qt.Key.Key_Escape and self.state == State.SMART_SOLVING:
             self.state = State.SMART_SCRAMBLING
@@ -497,7 +507,7 @@ class CubeWindow(QMainWindow):
         self.gen_scramble()
         return final_time
 
-    def stop_solve_ui(self, final_time):
+    def stop_solve_ui(self, final_time, notify=True):
         # Stop UI timer
         if self.timer:
             self.timer.stop()
@@ -506,7 +516,7 @@ class CubeWindow(QMainWindow):
 
         # Update session state asynchronously
         self.schedule_fn.emit(functools.partial(self.session_widget.trigger_update,
-                notify=True))
+                notify=notify))
 
     # Smart cube stuff
 
