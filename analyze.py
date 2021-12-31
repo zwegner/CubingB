@@ -16,6 +16,7 @@
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
 import collections
+import datetime
 import enum
 import functools
 import gzip
@@ -84,6 +85,23 @@ def get_ao_str(solves, start, size):
 
     return '%s = %s' % (' '.join(result), ms_str(mean))
 
+# Binary search helper, mainly used for calc_rolling_ao(). Slightly annoying in
+# that it needs to return the insertion position for new elements.
+def binary_search(l, i):
+    lo = 0
+    hi = len(l) - 1
+    while lo < hi:
+        mid = (hi + lo + 1) // 2
+        if l[mid] > i:
+            hi = mid - 1
+        elif l[mid] < i:
+            lo = mid
+        else:
+            return mid
+    if l[lo] < i:
+        return lo + 1
+    return lo
+
 # Calculate the aoX for all solves. This is more efficient (at least for bigger X)
 # since it's incrementally updated, but the code is a bit annoying. We use a
 # binary search on the sorted solves within the sliding window, so overall the
@@ -104,23 +122,6 @@ def calc_rolling_ao(solves, all_times, size):
     # Build initial list
     times = list(sorted(all_times[:size]))
 
-    # Binary search helper. Slightly annoying in that it needs to return the
-    # insertion position for new elements
-    def find(i):
-        lo = 0
-        hi = len(times) - 1
-        while lo < hi:
-            mid = (hi + lo + 1) // 2
-            if times[mid] > i:
-                hi = mid - 1
-            elif times[mid] < i:
-                lo = mid
-            else:
-                return mid
-        if times[lo] < i:
-            return lo + 1
-        return lo
-
     # Keep track of the sum of all solve times within the window
     total = sum(times[low:high])
     yield total / n_samples
@@ -129,13 +130,13 @@ def calc_rolling_ao(solves, all_times, size):
         assert not math.isnan(total)
         # Remove old solve time
         old = all_times[i]
-        o = find(old)
+        o = binary_search(times, old)
         assert times[o] == old, (times, old, o)
         times.pop(o)
 
         # Insert new solve
         new = all_times[i + size]
-        n = find(new)
+        n = binary_search(times, new)
         times.insert(n, new)
 
         # Recalculate total if the average is moving from DNF to non-DNF. If
@@ -919,7 +920,11 @@ class GraphDialog(QDialog):
         self.session_selector = SessionSelectorDialog(self)
 
         stat_label = QLabel('Stat:')
-        self.stat_selector = make_dropdown([stat_str(s) for s in STAT_AO_COUNTS],
+        # Build a dropdown and lookup tables for stats
+        self.stat_table = [stat_str(s) for s in STAT_AO_COUNTS]
+        self.stat_table.append('Solves per day')
+        self.inv_stat_table = STAT_AO_COUNTS + ['count']
+        self.stat_selector = make_dropdown(self.stat_table,
                 change=self.change_stat)
 
         record_cb = QCheckBox('Only records')
@@ -965,8 +970,10 @@ class GraphDialog(QDialog):
         self.render(keep_ranges=True)
 
     def change_stat(self):
-        self.stat = STAT_AO_COUNTS[self.stat_selector.currentIndex()]
-        self.render(keep_ranges=True)
+        was_count = (self.stat == 'count')
+        self.stat = self.inv_stat_table[self.stat_selector.currentIndex()]
+        is_count = (self.stat == 'count')
+        self.render(keep_ranges=not was_count ^ is_count)
 
     def change_type(self):
         self.type = GRAPH_TYPES[self.selector.currentIndex()]
@@ -989,7 +996,7 @@ class GraphDialog(QDialog):
         self.stat = stat
 
         with block_signals(self.stat_selector):
-            self.stat_selector.setCurrentIndex(STAT_AO_COUNTS.index(stat))
+            self.stat_selector.setCurrentIndex(self.inv_stat_table.index(stat))
 
         with db.get_session() as session:
             self.solve_sets = []
@@ -1008,20 +1015,36 @@ class GraphDialog(QDialog):
 
             [contained, indices] = line.contains(event)
             if contained:
-                # Get first point that contains cursor and set tooltip there
-                i = indices['ind'][0]
-                [x, y] = line.get_data()
-                self.tooltip.xy = [x[i], y[i]]
+                # The indices data for a stackplot are pretty much useless, so
+                # do some hacking to get coordinates
+                if self.stat == 'count':
+                    if event.xdata:
+                        self.tooltip.xy = [event.xdata, event.ydata]
 
-                # Remap index if we're not showing all solves
-                if name in self.index_map:
-                    i = self.index_map[name][i]
+                        [x, y] = self.line_data[name]
 
-                # Show some neat data there
-                [i, d, s] = solves[i]
-                t = s[stat_str(self.stat)]
-                self.tooltip.set_text('%s, %s\nSolve %s: %s' % (name,
-                        d, i, ms_str(t)))
+                        date = (datetime.date(1970, 1, 1) +
+                                datetime.timedelta(days=int(event.xdata)))
+                        i = binary_search(x, date)
+                        value = y[i] if i < len(x) and x[i] == date else 0
+
+                        self.tooltip.set_text('%s, %s\n%s solves' % (name,
+                                date, value))
+                else:
+                    # Get first point that contains cursor and set tooltip there
+                    i = indices['ind'][0]
+                    [x, y] = self.line_data[name]
+                    self.tooltip.xy = [x[i], y[i]]
+
+                    # Remap index if we're not showing all solves
+                    if name in self.index_map:
+                        i = self.index_map[name][i]
+
+                    # Show some neat data in the tooltip
+                    [i, d, s] = solves[i]
+                    t = s[stat_str(self.stat)]
+                    self.tooltip.set_text('%s, %s\nSolve %s: %s' % (name,
+                            d, i, ms_str(t)))
 
                 self.tooltip.set_visible(True)
                 self.figure.canvas.draw_idle()
@@ -1108,78 +1131,112 @@ class GraphDialog(QDialog):
             first_day = min(solves_per_day)
 
         self.lines = {}
+        self.line_data = {}
         self.index_map = {}
         color_index = 0
 
-        stat = stat_str(self.stat)
-
-        # Create plot for each session's solves
-        for [name, solves] in self.solve_sets:
+        # Helper to get graph color for a session
+        def get_color(name):
+            nonlocal color_index
             # Autodetect colors from the session name
-            color = None
             for c in COLORS:
                 if c in name:
-                    color = c
-                    break
+                    return c
             # Otherwise, choose a neutral color
             else:
                 if color_index < len(OTHER_COLORS):
                     color = OTHER_COLORS[color_index]
                     color_index += 1
+                    return color
 
-            # Create x series based on graph type
+        # Handle 'solves per day' metric
+        if self.stat == 'count':
+            # Count all solves based on the day
+            dates = {}
+            counts = {}
+            all_dates = set()
+            for [name, solves] in self.solve_sets:
+                dates[name] = [d.date() for [i, d, s] in solves]
+                counts[name] = collections.Counter(dates[name])
+                all_dates.update(counts[name].keys())
 
-            # Date: just use the solve time
-            if self.type == 'date':
-                x = [d for [i, d, s] in solves]
+            # Make a list of all dates in the range of the min/max dates
+            x = []
+            date = min(all_dates)
+            last_date = max(all_dates)
+            while date <= last_date:
+                date += datetime.timedelta(days=1)
+                x.append(date)
 
-            # Count: solve number
-            elif self.type == 'count':
-                x = range(len(solves))
+            # Collect counts per session on each day
+            y = {}
+            for [name, solves] in self.solve_sets:
+                y[name] = [counts[name][xx] for xx in x]
+                self.line_data[name] = [x, y[name]]
 
-            # Adaptive: for every day that had solves, stretch all solves out
-            # evenly throughout the day
-            elif self.type == 'adaptive':
-                sesh_solves_per_day = collections.Counter(d.date()
-                        for [i, d, s] in solves)
+            # Make a stack plot, and save the individual stack elements
+            lines = self.plot.stackplot(x, y.values(), labels=y.keys(),
+                    colors=[get_color(name) for [name, _] in self.solve_sets])
+            for [[name, _], line] in zip(self.solve_sets, lines):
+                self.lines[name] = line
+        else:
+            stat = stat_str(self.stat)
+            # Create plot for each session's solves
+            for [name, solves] in self.solve_sets:
+                # Create x series based on graph type
 
-                x = []
-                last_day = None
-                dc = 0
-                for [i, d, s] in solves:
-                    d = d.date()
-                    if last_day and d > last_day:
-                        dc = 0
-                    last_day = d
-                    x.append(day_ordinal[d] +
-                            dc / sesh_solves_per_day[d])
-                    dc += 1
+                # Date: just use the solve time
+                if self.type == 'date':
+                    x = [d for [i, d, s] in solves]
 
-            # Create y series from the given stat
-            y = [s[stat] / 1000 if s[stat] else None
-                    for [i, d, s] in solves]
+                # Count: solve number
+                elif self.type == 'count':
+                    x = range(len(solves))
 
-            # Record mode: only show the best stat up to a given point
-            if self.record:
-                best = 1e100
-                indices = []
-                new_x = []
-                new_y = []
-                for [i, [xx, yy]] in enumerate(zip(x, y)):
-                    if yy and yy < best:
-                        indices.append(i)
-                        best = yy
-                        new_x.append(xx)
-                        new_y.append(yy)
+                # Adaptive: for every day that had solves, stretch all solves out
+                # evenly throughout the day
+                elif self.type == 'adaptive':
+                    sesh_solves_per_day = collections.Counter(d.date()
+                            for [i, d, s] in solves)
 
-                self.index_map[name] = indices
-                [line] = self.plot.step(new_x, new_y, label=name, where='post',
-                        color=color)
-            else:
-                [line] = self.plot.plot(x, y, '.', label=name, markersize=1,
-                        color=color)
+                    x = []
+                    last_day = None
+                    dc = 0
+                    for [i, d, s] in solves:
+                        d = d.date()
+                        if last_day and d > last_day:
+                            dc = 0
+                        last_day = d
+                        x.append(day_ordinal[d] +
+                                dc / sesh_solves_per_day[d])
+                        dc += 1
 
-            self.lines[name] = line
+                # Create y series from the given stat
+                y = [s[stat] / 1000 if s[stat] else None
+                        for [i, d, s] in solves]
+
+                # Record mode: only show the best stat up to a given point
+                if self.record:
+                    best = 1e100
+                    indices = []
+                    new_x = []
+                    new_y = []
+                    for [i, [xx, yy]] in enumerate(zip(x, y)):
+                        if yy and yy < best:
+                            indices.append(i)
+                            best = yy
+                            new_x.append(xx)
+                            new_y.append(yy)
+
+                    self.index_map[name] = indices
+                    [line] = self.plot.step(new_x, new_y, label=name, where='post',
+                            color=get_color(name))
+                else:
+                    [line] = self.plot.plot(x, y, '.', label=name, markersize=1,
+                            color=get_color(name))
+
+                self.lines[name] = line
+                self.line_data[name] = [x, y]
 
         # Set the zoom limits
         [self.left_limit, self.right_limit] = self.plot.get_xlim()
