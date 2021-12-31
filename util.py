@@ -18,7 +18,7 @@
 import contextlib
 import time
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import (Qt, QSize)
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
         QTableWidgetItem, QHeaderView, QTabBar, QDialog, QLabel, QComboBox,
         QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView)
@@ -194,6 +194,9 @@ class SessionSelectorDialog(QDialog):
         self.allow_multi = False
         self.selected_session = None
         self.session_ids = []
+
+    def sizeHint(self):
+        return QSize(400, 600)
 
     def update_data(self, message, sessions, allow_new=False, allow_multi=False):
         self.selected_session = None
