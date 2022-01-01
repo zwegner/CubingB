@@ -23,9 +23,11 @@ import functools
 import gzip
 import os
 import pstats
+import queue
 import random
 import struct
 import sys
+import threading
 import time
 
 from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
@@ -103,6 +105,17 @@ def show_merge_dialog(session, session_selector, msg, query, exclude_session=Non
         return merge_id
     return None
 
+# For certain tasks that take a long time, we put them in a queue for a background
+# thread to run
+BACKGROUND_QUEUE = queue.Queue()
+def sched_background_task(fn):
+    BACKGROUND_QUEUE.put(fn)
+
+def run_background_thread():
+    while True:
+        task = BACKGROUND_QUEUE.get()
+        task()
+
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
 class CubeWindow(QMainWindow):
@@ -133,6 +146,10 @@ class CubeWindow(QMainWindow):
                 sesh = session.insert(db.Session, name='New Session',
                         puzzle_type='3x3')
                 settings.current_session = sesh
+
+        # Start background thread
+        self.bg_thread = threading.Thread(daemon=True, target=run_background_thread)
+        self.bg_thread.start()
 
         # Create basic layout/widgets. We do this first because the various
         # initialization functions can send data to the appropriate widgets to
@@ -422,6 +439,15 @@ class CubeWindow(QMainWindow):
     def set_pending(self):
         self.stop_pending(True)
 
+    def async_gen_scramble(self):
+        scramble = solver.gen_random_state_scramble()
+
+        # Let's hope nothing weird has happened in the meantime
+        if self.cached_scramble is None:
+            self.cached_scramble = scramble
+
+            self.schedule_fn.emit(self.gen_scramble)
+
     def gen_scramble(self):
         self.reset()
         if self.smart_device:
@@ -433,11 +459,14 @@ class CubeWindow(QMainWindow):
         self.end_time = None
 
         self.scramble = None
+        self.scramble_message = None
         type = self.session_widget.scramble_type
         if type == ScrambleType.RANDOM_STATE:
-            if not self.cached_scramble:
-                self.cached_scramble = solver.gen_random_state_scramble()
-            self.scramble = self.cached_scramble
+            if self.cached_scramble:
+                self.scramble = self.cached_scramble
+            else:
+                sched_background_task(self.async_gen_scramble)
+                self.scramble_message = 'Generating scramble...'
         elif type == ScrambleType.RANDOM_MOVES:
             self.scramble = solver.gen_random_move_scramble(SCRAMBLE_MOVES)
         elif type == ScrambleType.ENTER_SCRAMBLE:
@@ -447,6 +476,10 @@ class CubeWindow(QMainWindow):
                 scramble = scramble.split()
                 if solver.validate_scramble(scramble):
                     self.scramble = scramble
+                else:
+                    self.scramble_message = 'Maybe try entering a VALID scramble?'
+            else:
+                self.scramble_message = 'Enter a scramble please.'
         elif type == ScrambleType.HAND_SCRAMBLE:
             self.scramble = []
 
@@ -536,7 +569,8 @@ class CubeWindow(QMainWindow):
             self.smart_data_copy = None
 
     def mark_scramble_changed(self):
-        self.scramble_widget.set_scramble(self.scramble, self.scramble_left)
+        self.scramble_widget.set_scramble(self.scramble, self.scramble_left,
+                self.scramble_message)
         self.scramble_view_widget.set_scramble(self.scramble)
         self.update()
 
@@ -963,12 +997,9 @@ class ScrambleWidget(QLabel):
             text = ' '.join(self.scramble_popup.get_b64_pics(self.diagram_size, 10))
             QToolTip.showText(QCursor.pos(), text)
 
-    def set_scramble(self, scramble, scramble_left):
+    def set_scramble(self, scramble, scramble_left, scramble_message):
         if not scramble:
-            if scramble is None:
-                self.setText('No scramble.')
-            else:
-                self.setText('Scramble by hand now.')
+            self.setText(scramble_message)
             self.update()
             return
 
