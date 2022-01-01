@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget,
         QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
         QDialog, QDialogButtonBox, QAbstractItemView, QFrame,
         QCheckBox, QSlider, QMessageBox, QInputDialog, QMenu,
-        QPlainTextEdit, QToolTip)
+        QPlainTextEdit, QToolTip, QScrollArea)
 from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
         QRegion, QColor)
 from PyQt5.QtSvg import QSvgWidget
@@ -1186,8 +1186,7 @@ class SessionWidget(QWidget):
                     session.rollback()
         else:
             n_solves = 5 if col == 1 else 12
-            self.average_viewer.update_solve(solve_id, n_solves)
-            self.average_viewer.exec()
+            self.show_average(solve_id, n_solves)
 
     def show_graph(self, stat):
         with db.get_session() as session:
@@ -1200,6 +1199,10 @@ class SessionWidget(QWidget):
             s_id = session.query_first(db.Settings).current_session_id
             self.top_solves_viewer.update_data([s_id])
         self.top_solves_viewer.exec()
+
+    def show_average(self, solve_id, n_solves):
+        self.average_viewer.update_solve(solve_id, n_solves)
+        self.average_viewer.exec()
 
     def show_ctx_menu(self, pos):
         self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
@@ -1291,7 +1294,8 @@ class SessionWidget(QWidget):
             # Clear the stats
             self.layout.removeWidget(self.stats)
             self.stats = QWidget()
-            self.stats.setStyleSheet('QLabel { font: 16px; }')
+            self.stats.setStyleSheet('QLabel, QPushButton { font: 16px; '
+                    'text-align: left; }')
             self.layout.addWidget(self.stats, 2, 0, 1, 4)
 
             if self.playback_mode:
@@ -1314,10 +1318,21 @@ class SessionWidget(QWidget):
                     stat = stat_str(size)
                     graph_button = make_button('graph.svg',
                             functools.partial(self.show_graph, size), icon=True)
-                    mean = sesh.cached_stats_current[stat]
-                    best = sesh.cached_stats_best[stat]
-                    stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
-                            QLabel(ms_str(best)), graph_button])
+                    # Dumb helper to reduce repeated code a bit
+                    def make_stat_button(id, value):
+                        value = ms_str(value)
+                        if id is not None and size > 1:
+                            return make_button(value,
+                                    functools.partial(self.show_average, id, size),
+                                    border=False)
+                        else:
+                            return QLabel(value)
+                    mean = make_stat_button(solves[0].id,
+                            sesh.cached_stats_current[stat])
+                    best = make_stat_button(
+                            sesh.cached_stats_best_solve_id.get(stat),
+                            sesh.cached_stats_best[stat])
+                    stat_table.append([QLabel(stat), mean, best, graph_button])
 
                 make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
 
@@ -1476,7 +1491,7 @@ class SolveEditorDialog(QDialog):
                         lambda: self.start_playback(solve_id, solve_nb))
             else:
                 self.smart_widget = QLabel('None')
-            self.layout.addWidget(self.smart_widget, 5, 1)
+            self.layout.addWidget(self.smart_widget, 6, 1)
         self.update()
 
     def hover_scramble(self, link):
@@ -1521,11 +1536,25 @@ class AverageDialog(QDialog):
 
         self.result_label = QLabel()
         self.result_label.setWordWrap(True)
+        self.result_label.setStyleSheet('font: 14px Courier; min-height: 10px')
 
-        make_grid(self, [
-            [QLabel('Result:'), self.result_label],
-            [buttons],
-        ])
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.scroll_area.setWidget(self.result_label)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.text = ''
+        copy_button = make_button('Copy to clipboard', self.copy_text)
+
+        make_vbox(self, [copy_button, self.scroll_area, buttons])
+
+    def sizeHint(self):
+        return QSize(800, 500)
+
+    def copy_text(self):
+        APP.clipboard().setText(self.text)
 
     def update_solve(self, solve_id, n_solves):
         self.solve_id = solve_id
@@ -1538,11 +1567,51 @@ class AverageDialog(QDialog):
                     .order_by(db.Solve.created_at.desc()).limit(n_solves).all())
             solves = solves[::-1]
 
-            self.result_label.setText(analyze.get_ao_str(solves, 0, n_solves))
-        self.update()
+            if len(solves) < n_solves or n_solves < 3:
+                self.accept()
+                return
 
-    def sizeHint(self):
-        return QSize(400, 100)
+            solves = solves[:n_solves]
+            times = [(solve_time(s), s.id) for s in solves]
+            times.sort()
+
+            # No outliers for mo3
+            if n_solves < 5:
+                times = [t for [t, _] in times]
+                outlier_set = set()
+            else:
+                outliers = (n_solves * analyze.STAT_OUTLIER_PCT + 99) // 100
+                outlier_set = {s_id for [_, s_id] in
+                        times[:outliers] + times[-outliers:]}
+                times = [t for [t, _] in times[outliers:-outliers]]
+            mean = sum(times) / len(times)
+
+            result = []
+            details = []
+            for [i, solve] in enumerate(solves):
+                s = ms_str(solve_time(solve))
+                if solve.id in outlier_set:
+                    s = '(%s)' % s
+                result.append(s)
+                label = '%s. %s' % (i + 1, s)
+                details.append('%s%s%s' % (label, ' ' * (16 - len(label)),
+                        solve.scramble))
+
+            first_date = solves[0].created_at
+            last_date = solves[-1].created_at
+            if first_date.date() == last_date.date():
+                last_date = last_date.time()
+            self.text = '%s from %s to %s\n\n%s = %s\n\n%s' % (stat_str(n_solves),
+                    first_date, last_date, ' '.join(result), ms_str(mean),
+                    '\n'.join(details))
+            self.result_label.setText(self.text)
+            # Resize to zero, without this Qt would not automatically resize
+            # the widget? E.g. moving from ao12 to ao100 would clip the bottom
+            # of the ao100, moving from ao100 to ao12 would have huge margins.
+            # Seems like a Qt bug
+            self.result_label.resize(0, 0)
+
+        self.update()
 
 class TopSolvesDialog(QDialog):
     def __init__(self, parent):

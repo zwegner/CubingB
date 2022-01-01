@@ -84,7 +84,7 @@ def session_sort_key(s):
 
 # Qt helpers
 
-def make_button(text, fn, icon=False, size=None):
+def make_button(text, fn, icon=False, size=None, border=True):
     # For an icon, the text is a path to an icon, also remove border
     if icon or isinstance(text, QIcon):
         if not isinstance(text, QIcon):
@@ -96,6 +96,8 @@ def make_button(text, fn, icon=False, size=None):
             button.setStyleSheet('border: none;')
     else:
         button = QPushButton(text)
+        if not border:
+            button.setStyleSheet('border: none;')
     button.clicked.connect(fn)
     return button
 

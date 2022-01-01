@@ -64,26 +64,6 @@ def calc_ao(all_times, start, size):
 
     return mean
 
-def get_ao_str(solves, start, size):
-    if len(solves) - start < size or size < 5:
-        return ''
-    solves = solves[start:start+size]
-    times = [(solve_time(s), s.id) for s in solves]
-    times.sort()
-    outliers = (size * STAT_OUTLIER_PCT + 99) // 100
-    outlier_set = {s_id for [_, s_id] in times[:outliers] + times[-outliers:]}
-    times = [t for [t, _] in times[outliers:-outliers]]
-    mean = sum(times) / len(times)
-
-    result = []
-    for solve in solves:
-        s = ms_str(solve_time(solve))
-        if solve.id in outlier_set:
-            s = '(%s)' % s
-        result.append(s)
-
-    return '%s = %s' % (' '.join(result), ms_str(mean))
-
 # Binary search helper, mainly used for calc_rolling_ao(). Slightly annoying in
 # that it needs to return the insertion position for new elements.
 def binary_search(l, i):
