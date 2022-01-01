@@ -1402,11 +1402,14 @@ class SolveEditorDialog(QDialog):
         delete = make_button('Delete', self.delete_solve)
         merge = make_button('Move to session...', self.move_solve)
 
+        copy_button = make_button('Copy scramble to clipboard', self.copy_scramble)
+
         self.layout = make_grid(self, [
             [QLabel('Session:'), self.session_label],
             [QLabel('Time:'), self.time_label],
             [QLabel('Result:'), self.result_label],
             [QLabel('Scramble:'), self.scramble_label],
+            [None, copy_button],
             [QLabel('Notes:'), self.notes],
             [QLabel('Smart data:'), self.smart_widget],
             [self.dnf, self.plus_2],
@@ -1418,6 +1421,9 @@ class SolveEditorDialog(QDialog):
 
         self.solve_id = None
         self.scramble = None
+
+    def copy_scramble(self):
+        APP.clipboard().setText(self.scramble)
 
     def make_edit(self, key, value):
         with db.get_session() as session:
@@ -1965,14 +1971,14 @@ class SmartPlaybackWidget(QWidget):
         self.parent.gl_widget.base_quat = solve.base_quat
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    app.setApplicationName('CubingB')
+    APP = QApplication(sys.argv)
+    APP.setApplicationName('CubingB')
     icon = QIcon('rsrc/cubingb-icon-small.png')
-    app.setWindowIcon(icon)
+    APP.setWindowIcon(icon)
     window = CubeWindow()
     window.show()
     # Profile mode
     if '-p' in sys.argv:
-        cProfile.run('app.exec_()', sort=pstats.SortKey.CUMULATIVE)
+        cProfile.run('APP.exec_()', sort=pstats.SortKey.CUMULATIVE)
     else:
-        sys.exit(app.exec_())
+        sys.exit(APP.exec_())
