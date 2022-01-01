@@ -21,7 +21,9 @@ import time
 from PyQt5.QtCore import (Qt, QSize)
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
         QTableWidgetItem, QHeaderView, QTabBar, QDialog, QLabel, QComboBox,
-        QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView)
+        QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView, QAction,
+        QPushButton)
+from PyQt5.QtGui import QIcon
 
 # Global constants
 
@@ -81,6 +83,21 @@ def session_sort_key(s):
     return s.id
 
 # Qt helpers
+
+def make_button(text, fn, icon=False, size=None):
+    # For an icon, the text is a path to an icon, also remove border
+    if icon or isinstance(text, QIcon):
+        if not isinstance(text, QIcon):
+            text = QIcon('rsrc/' + text)
+        button = QPushButton(text, '')
+        if size:
+            button.setStyleSheet('border: none; icon-size: %spx %spx;' % (size, size))
+        else:
+            button.setStyleSheet('border: none;')
+    else:
+        button = QPushButton(text)
+    button.clicked.connect(fn)
+    return button
 
 def cell(text, editable=False, secret_data=None):
     item = QTableWidgetItem(text)
@@ -143,6 +160,11 @@ def make_dropdown(items, change=None):
     if change:
         combo.currentIndexChanged.connect(change)
     return combo
+
+def add_menu_action(menu, text, fn):
+    action = QAction(text, menu)
+    action.triggered.connect(fn)
+    menu.addAction(action)
 
 # Set the column headers for a table.
 # The hacky 'stretch' parameter will stretch all columns if it's negative, or a

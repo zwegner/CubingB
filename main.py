@@ -35,8 +35,8 @@ from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget,
         QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
         QDialog, QDialogButtonBox, QAbstractItemView, QFrame,
-        QCheckBox, QPushButton, QSlider, QMessageBox, QInputDialog, QMenu,
-        QAction, QPlainTextEdit, QToolTip)
+        QCheckBox, QSlider, QMessageBox, QInputDialog, QMenu,
+        QPlainTextEdit, QToolTip)
 from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
         QRegion, QColor)
 from PyQt5.QtSvg import QSvgWidget
@@ -172,22 +172,21 @@ class CubeWindow(QMainWindow):
         self.settings_dialog = SettingsDialog(self)
 
         # Set up settings buttons
-        settings_icon = QIcon('rsrc/material/settings_black_24dp.svg')
-        settings_button = QPushButton(settings_icon, '')
-        settings_button.clicked.connect(self.settings_dialog.exec)
-        bt_icon = QIcon('rsrc/material/bluetooth_black_24dp.svg')
-        bt_button = QPushButton(bt_icon, '')
-        bt_button.clicked.connect(self.bt_connection_dialog.exec)
+        settings_button = make_button('material/settings_black_24dp.svg',
+                self.settings_dialog.exec, icon=True)
+        bt_button = make_button('material/bluetooth_black_24dp.svg',
+                self.bt_connection_dialog.exec, icon=True)
 
+        for button in [settings_button, bt_button]:
+            button.setStyleSheet('QPushButton { icon-size: 20px 20px; max-width: 30px; '
+                    'border: 1px solid #777; border-radius: 3px; '
+                    'border-style: outset; padding: 5px; margin: 0px; '
+                    'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
+                    '   stop: 0 #fff, stop: 1 #eee); } '
+                    'QPushButton::pressed { '
+                    'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
+                    '   stop: 0 #ccc, stop: 1 #aaa); } ')
         buttons = QWidget()
-        buttons.setStyleSheet('QPushButton { icon-size: 20px 20px; max-width: 30px; '
-                'border: 1px solid #777; border-radius: 3px; '
-                'border-style: outset; padding: 5px; margin: 0px; '
-                'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
-                '   stop: 0 #fff, stop: 1 #eee); } '
-                'QPushButton::pressed { '
-                'background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, '
-                '   stop: 0 #ccc, stop: 1 #aaa); } ')
         make_grid(buttons, [[settings_button], [bt_button]], margin=0)
 
         # Make main layout
@@ -783,8 +782,8 @@ class SettingsDialog(QDialog):
             slider.valueChanged.connect(update)
             sliders.append([QLabel('Rotation %s:' % axis.upper()), slider])
 
-        reset_button = QPushButton('Reset Camera')
-        reset_button.clicked.connect(self.parent.gl_widget.reset_camera)
+        reset_button = make_button('Reset Camera',
+                self.parent.gl_widget.reset_camera)
 
         # Initialize persistent settings
         with db.get_session() as session:
@@ -817,13 +816,11 @@ class BluetoothConnectionDialog(QDialog):
         super().__init__(parent)
         self.bt_handler = bt_handler
 
-        scan = QPushButton('Scan')
-        scan.clicked.connect(self.start_scan)
+        scan = make_button('Scan', self.start_scan)
 
         self.status = QLabel()
-        self.disconnect = QPushButton('Disconnect')
+        self.disconnect = make_button('Disconnect', self.disconnect_device)
         self.disconnect.hide()
-        self.disconnect.clicked.connect(self.disconnect_device)
 
         self.table = QTableWidget()
         set_table_columns(self.table, ['Name', 'Status'], stretch=-1)
@@ -1126,21 +1123,15 @@ class SessionWidget(QWidget):
         self.label = QLabel('Session:')
         self.label.setStyleSheet('font: 18px; font-weight: bold;')
         self.selector = make_dropdown([], change=self.change_session)
-        new_icon = QIcon('rsrc/material/add_black_24dp.svg')
-        new = QPushButton(new_icon, '')
-        new.setStyleSheet('border: none; max-width: 20px;')
-        new.clicked.connect(self.new_session)
-        edit_icon = QIcon('rsrc/material/edit_note_black_24dp.svg')
-        edit = QPushButton(edit_icon, '')
-        edit.setStyleSheet('border: none; max-width: 20px;')
-        edit.clicked.connect(self.edit_sessions)
+        new = make_button('material/add_black_24dp.svg', self.new_session,
+                icon=True, size=20)
+        edit = make_button('material/edit_note_black_24dp.svg', self.edit_sessions,
+                icon=True, size=20)
 
         self.stats = QWidget()
 
-        action = QAction('Move to session...', self)
-        action.triggered.connect(self.move_selection)
         self.ctx_menu = QMenu(self)
-        self.ctx_menu.addAction(action)
+        add_menu_action(self.ctx_menu, 'Move to session...', self.move_selection)
 
         self.table = LazyTable(lambda: self.trigger_update(do_full_render=True))
         self.table.setStyleSheet('font: 16px')
@@ -1308,14 +1299,11 @@ class SessionWidget(QWidget):
             if not self.playback_mode:
                 # Calculate statistics, build stat table
                 stat_table = [[None, QLabel('current'), QLabel('best'), None]]
-                graph_icon = QIcon('rsrc/graph.svg')
                 analyze.calc_session_stats(sesh, solves)
                 for size in STAT_AO_COUNTS:
                     stat = stat_str(size)
-                    graph_button = QPushButton(graph_icon, '')
-                    graph_button.setStyleSheet('border: none;')
-                    graph_button.clicked.connect(
-                            functools.partial(self.show_graph, size))
+                    graph_button = make_button('graph.svg',
+                            functools.partial(self.show_graph, size), icon=True)
                     mean = sesh.cached_stats_current[stat]
                     best = sesh.cached_stats_best[stat]
                     stat_table.append([QLabel(stat), QLabel(ms_str(mean)),
@@ -1401,10 +1389,8 @@ class SolveEditorDialog(QDialog):
         self.plus_2 = QCheckBox('+2')
         self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', bool(v)))
 
-        delete = QPushButton('Delete')
-        delete.clicked.connect(self.delete_solve)
-        merge = QPushButton('Move to session...')
-        merge.clicked.connect(self.move_solve)
+        delete = make_button('Delete', self.delete_solve)
+        merge = make_button('Move to session...', self.move_solve)
 
         self.layout = make_grid(self, [
             [QLabel('Session:'), self.session_label],
@@ -1470,8 +1456,7 @@ class SolveEditorDialog(QDialog):
                 self.layout.removeWidget(self.smart_widget)
             if solve.smart_data_raw:
                 solve_nb = get_solve_nb(session, solve)
-                self.smart_widget = QPushButton('View Playback')
-                self.smart_widget.clicked.connect(
+                self.smart_widget = make_button('View Playback',
                         lambda: self.start_playback(solve_id, solve_nb))
             else:
                 self.smart_widget = QLabel('None')
@@ -1625,10 +1610,8 @@ class SessionEditorDialog(QDialog):
         # Create context menu items for graphing stats
         self.ctx_menu = QMenu(self)
         for s in STAT_AO_COUNTS:
-            stat = stat_str(s)
-            action = QAction('Graph %s' % stat, self)
-            action.triggered.connect(functools.partial(self.graph_selection, s))
-            self.ctx_menu.addAction(action)
+            add_menu_action(self.ctx_menu, 'Graph %s' % stat_str(s),
+                    functools.partial(self.graph_selection, s))
 
         self.table = ReorderTableWidget(self, self.rows_reordered)
         columns = ['Name', 'Puzzle', '# Solves', 'Solve Reminder']
@@ -1750,8 +1733,8 @@ class SessionEditorDialog(QDialog):
                         self.table.setItem(i, 4+j,
                                 cell(ms_str(stats.get(stat))))
                     offset = 4 + len(STAT_AO_COUNTS)
-                    button = QPushButton('Merge...')
-                    button.clicked.connect(functools.partial(self.merge_sessions, sesh.id))
+                    button = make_button('Merge...',
+                            functools.partial(self.merge_sessions, sesh.id))
                     self.table.setCellWidget(i, offset+0, button)
 
         self.table.resizeColumnsToContents()
@@ -1765,20 +1748,15 @@ class SmartPlaybackWidget(QWidget):
         # button (in the self object) since that changes dynamically
         self.play_icon = QIcon('rsrc/material/play_arrow_black_24dp.svg')
         self.pause_icon = QIcon('rsrc/material/pause_black_24dp.svg')
-        self.play_button = QPushButton(self.play_icon, '')
-        self.play_button.clicked.connect(self.play_pause)
+        self.play_button = make_button(self.play_icon, self.play_pause, size=40)
 
-        start_icon = QIcon('rsrc/material/skip_previous_black_24dp.svg')
-        start_button = QPushButton(start_icon, '')
-        start_button.clicked.connect(lambda: self.scrub(0))
-        end_icon = QIcon('rsrc/material/skip_next_black_24dp.svg')
-        end_button = QPushButton(end_icon, '')
-        end_button.clicked.connect(lambda: self.events and
-                self.scrub(len(self.events) - 1))
+        start_button = make_button('material/skip_previous_black_24dp.svg',
+                lambda: self.scrub(0), icon=True, size=40)
+        end_button = make_button('material/skip_next_black_24dp.svg',
+                lambda: self.events and self.scrub(len(self.events) - 1),
+                icon=True, size=40)
 
         controls = QWidget()
-        controls.setStyleSheet('QPushButton { icon-size: 40px 40px; '
-                'border: none; }')
         make_grid(controls, [[None, start_button, self.play_button, end_button, None,
                 ]], stretch=[1, 0, 0, 0, 1])
 

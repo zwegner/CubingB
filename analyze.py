@@ -30,8 +30,7 @@ import time
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
 from PyQt5.QtWidgets import (QLabel, QDialog, QDialogButtonBox,
-        QWidget, QSizePolicy, QScrollArea, QTableWidget, QPushButton,
-        QCheckBox)
+        QWidget, QSizePolicy, QScrollArea, QTableWidget, QCheckBox)
 from PyQt5.QtSvg import QSvgWidget
 
 import db
@@ -533,8 +532,8 @@ class AlgViewer(QWidget):
         self.alg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.alg_icon = QSvgWidget()
         self.alg_icon.setFixedSize(120, 120)
-        back = QPushButton('Return to cases')
-        back.clicked.connect(functools.partial(self.select_case, None, False))
+        back = make_button('Return to cases',
+                functools.partial(self.select_case, None, False))
         left = QWidget()
         layout = make_vbox(left, [back, self.alg_icon, self.alg_label])
         layout.addStretch(1)
@@ -915,8 +914,7 @@ class GraphDialog(QDialog):
         select_label = QLabel('Graph Type:')
         self.selector = make_dropdown(GRAPH_TYPES, change=self.change_type)
 
-        session_button = QPushButton('Select sessions...')
-        session_button.clicked.connect(self.change_sessions)
+        session_button = make_button('Select sessions...', self.change_sessions)
         self.session_selector = SessionSelectorDialog(self)
 
         stat_label = QLabel('Stat:')
