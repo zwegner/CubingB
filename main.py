@@ -1080,6 +1080,43 @@ class ScrambleViewWidget(QFrame):
             data = bytes(ba.toBase64()).decode()
             yield '<img src="data:image/png;base64, %s">' % data
 
+# For a big session with thousands of solves, the solve table becomes really slow
+# to generate after every solve or whenever you change sessions. So instead, we
+# only render the first handful of rows (handled in SessionWidget.trigger_update()),
+# and use this wrapper around QTableWidget that notices when you scroll to the
+# bottom. When it does, the rest of the rows are generated. We could do some more
+# fine-grained logic here, and still only generate the next chunk of rows, but this
+# is good enough for now
+class LazyTable(QTableWidget):
+    delay_scroll = pyqtSignal([int])
+    def __init__(self, resize_trigger):
+        super().__init__()
+        self.resize_trigger = resize_trigger
+        self.is_full = False
+
+        self.delay_scroll.connect(self.scroll, type=Qt.QueuedConnection)
+
+    def clearContents(self):
+        super().clearContents()
+        self.is_full = False
+        self.verticalScrollBar().setValue(0)
+
+    def wheelEvent(self, event):
+        if not self.is_full:
+            bar = self.verticalScrollBar()
+            pos = bar.sliderPosition()
+            # Reached the bottom: render the rest of the rows, and then schedule
+            # a scroll for later to stay at the same position. We have to delay
+            # to give the table time to render, since even without clearing
+            # the old table contents, the size would somehow get smaller here...
+            if pos > bar.maximum() - 20:
+                self.is_full = self.resize_trigger()
+                self.delay_scroll.emit(pos)
+        super().wheelEvent(event)
+
+    def scroll(self, pos):
+        self.verticalScrollBar().setValue(pos)
+
 class SessionWidget(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -1105,7 +1142,7 @@ class SessionWidget(QWidget):
         self.ctx_menu = QMenu(self)
         self.ctx_menu.addAction(action)
 
-        self.table = QTableWidget()
+        self.table = LazyTable(lambda: self.trigger_update(do_full_render=True))
         self.table.setStyleSheet('font: 16px')
         set_table_columns(self.table, ['Time', 'ao5', 'ao12'], stretch=-1)
 
@@ -1217,7 +1254,7 @@ class SessionWidget(QWidget):
         self.playback_mode = mode
         self.trigger_update()
 
-    def trigger_update(self, notify=False):
+    def trigger_update(self, notify=False, do_full_render=False):
         with db.get_session() as session:
             sesh = session.query_first(db.Settings).current_session
 
@@ -1300,7 +1337,6 @@ class SessionWidget(QWidget):
                         self.parent.send_notification('This is your %s-solve '
                                 'reminder!' % n)
 
-
             # Skip non-smart solves if we're in playback mode. We have the
             # skip logic here (as opposed to SQL) just to keep the solve
             # numbers the same
@@ -1309,6 +1345,13 @@ class SessionWidget(QWidget):
                 if self.playback_mode and solve.smart_data_raw is None:
                     continue
                 filtered_solves.append((len(solves) - i, solve))
+
+            old_solves = filtered_solves
+            # For a full render, we don't clear the first batch of solves that
+            # are at the top of the table, but just append to the bottom
+            if not do_full_render:
+                filtered_solves = filtered_solves[:40]
+            is_full = (len(filtered_solves) == len(old_solves))
 
             # Build the table of actual solves
             self.table.setRowCount(len(filtered_solves))
@@ -1329,6 +1372,7 @@ class SessionWidget(QWidget):
                 self.table.setItem(i, 2, cell(ms_str(stats.get('ao12'))))
 
             self.update()
+            return is_full
 
 class SolveEditorDialog(QDialog):
     def __init__(self, parent):
