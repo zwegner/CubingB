@@ -1161,6 +1161,7 @@ class SessionWidget(QWidget):
         self.solve_editor = SolveEditorDialog(self)
         self.average_viewer = AverageDialog(self)
         self.graph_viewer = analyze.GraphDialog(self)
+        self.top_solves_viewer = TopSolvesDialog(self)
         self.playback_mode = False
 
     def edit_solve(self, row, col):
@@ -1193,6 +1194,12 @@ class SessionWidget(QWidget):
             s_id = session.query_first(db.Settings).current_session_id
             self.graph_viewer.update_data([s_id], stat=stat)
         self.graph_viewer.exec()
+
+    def show_top_solves(self):
+        with db.get_session() as session:
+            s_id = session.query_first(db.Settings).current_session_id
+            self.top_solves_viewer.update_data([s_id])
+        self.top_solves_viewer.exec()
 
     def show_ctx_menu(self, pos):
         self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
@@ -1298,7 +1305,10 @@ class SessionWidget(QWidget):
 
             if not self.playback_mode:
                 # Calculate statistics, build stat table
-                stat_table = [[None, QLabel('current'), QLabel('best'), None]]
+                top_btn = make_button('material/format_list_numbered_black_24dp.svg',
+                        self.show_top_solves, icon=True)
+
+                stat_table = [[None, QLabel('current'), QLabel('best'), top_btn]]
                 analyze.calc_session_stats(sesh, solves)
                 for size in STAT_AO_COUNTS:
                     stat = stat_str(size)
@@ -1528,6 +1538,57 @@ class AverageDialog(QDialog):
     def sizeHint(self):
         return QSize(400, 100)
 
+class TopSolvesDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.label = QLabel('Session:')
+
+        self.table = QTableWidget()
+        set_table_columns(self.table, ['Session', 'Date', 'Time'], stretch=1)
+        self.table.cellDoubleClicked.connect(self.show_solve)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(self.accept)
+
+        make_vbox(self, [self.table, buttons])
+
+        self.solve_editor = SolveEditorDialog(self)
+
+    def sizeHint(self):
+        return QSize(500, 800)
+
+    def show_solve(self, row, col):
+        solve_id = self.table.item(row, 0).secret_data
+        self.solve_editor.update_solve(solve_id)
+        # Start a DB session here just so we can rollback if the user cancels
+        with db.get_session() as session:
+            if self.solve_editor.exec():
+                self.trigger_update()
+            else:
+                session.rollback()
+
+    def update_data(self, session_ids, stat=1):
+        solves = []
+        limit = 100
+        with db.get_session() as session:
+            for id in session_ids:
+                sesh = session.query_first(db.Session, id=id)
+                query = (session.query(db.Solve).filter_by(session=sesh)
+                        .order_by(db.Solve.dnf * 1e100 + db.Solve.time_ms
+                        + db.Solve.plus_2 * 2000).limit(limit))
+                solves.extend((sesh.name, s.id, s.created_at, solve_time(s))
+                        for s in query)
+
+        self.table.clearContents()
+        self.table.setRowCount(limit)
+        solves.sort(key=lambda s: s[3])
+        for [i, [s, id, d, t]] in enumerate(solves[:limit]):
+            self.table.setItem(i, 0, cell(s, secret_data=id))
+            self.table.setItem(i, 1, cell(str(d)))
+            self.table.setItem(i, 2, cell(ms_str(t)))
+        self.update()
+
 # Based on https://stackoverflow.com/a/43789304
 class ReorderTableWidget(QTableWidget):
     def __init__(self, parent, reorder_cb):
@@ -1609,6 +1670,8 @@ class SessionEditorDialog(QDialog):
 
         # Create context menu items for graphing stats
         self.ctx_menu = QMenu(self)
+        add_menu_action(self.ctx_menu, 'View top solves',
+                functools.partial(self.view_top_selection))
         for s in STAT_AO_COUNTS:
             add_menu_action(self.ctx_menu, 'Graph %s' % stat_str(s),
                     functools.partial(self.graph_selection, s))
@@ -1632,6 +1695,7 @@ class SessionEditorDialog(QDialog):
 
         self.session_selector = SessionSelectorDialog(self)
         self.graph_viewer = analyze.GraphDialog(self)
+        self.top_solves_viewer = TopSolvesDialog(self)
 
     def show_ctx_menu(self, pos):
         self.ctx_menu.popup(self.table.viewport().mapToGlobal(pos))
@@ -1642,6 +1706,13 @@ class SessionEditorDialog(QDialog):
             ids = [self.table.item(row, 0).secret_data[0] for row in rows]
             self.graph_viewer.update_data(ids, stat=stat)
         self.graph_viewer.exec()
+
+    def view_top_selection(self):
+        with db.get_session() as session:
+            rows = {item.row() for item in self.table.selectedItems()}
+            ids = [self.table.item(row, 0).secret_data[0] for row in rows]
+            self.top_solves_viewer.update_data(ids)
+        self.top_solves_viewer.exec()
 
     def edit_attr(self, item):
         [id, attr, *t] = item.secret_data
