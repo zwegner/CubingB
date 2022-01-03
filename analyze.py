@@ -1011,7 +1011,7 @@ class GraphDialog(QDialog):
                 else:
                     # Get first point that contains cursor and set tooltip there
                     i = indices['ind'][0]
-                    [x, y] = self.line_data[name]
+                    [x, y] = line.get_data()
                     self.tooltip.xy = [x[i], y[i]]
 
                     # Remap index if we're not showing all solves
@@ -1214,7 +1214,6 @@ class GraphDialog(QDialog):
                             color=get_color(name))
 
                 self.lines[name] = line
-                self.line_data[name] = [x, y]
 
         # Set the zoom limits
         [self.left_limit, self.right_limit] = self.plot.get_xlim()
