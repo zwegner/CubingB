@@ -38,7 +38,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget,
         QCheckBox, QSlider, QMessageBox, QInputDialog, QMenu,
         QPlainTextEdit, QToolTip, QScrollArea)
 from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
-        QRegion, QColor)
+        QRegion, QColor, QPixmap)
 from PyQt5.QtSvg import QSvgWidget
 
 import analyze
@@ -198,13 +198,15 @@ class CubeWindow(QMainWindow):
         self.tab_bar = make_tabs('Timer', 'Watch', 'Train', 'Algs',
                 change=self.change_tab)
 
+        logo = QLabel(self)
+        logo.setPixmap(QPixmap('rsrc/cubingb-icon-small.png').scaled(64, 64))
         title = QLabel('CubingB')
         title.setStyleSheet('font: 48px; padding: 8px;')
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left = QWidget()
         make_grid(left, [
             [self.tab_bar], 
-            [title, buttons],
+            [logo, title, buttons],
             [self.session_widget]
         ], margin=0, widths=[0, 40])
         left.setStyleSheet('SessionWidget, QTabBar { min-width: 300px; max-width: 350px; }')
