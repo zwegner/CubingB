@@ -762,6 +762,8 @@ def gen_indices():
 
         return
 
+    print('Constructing solver tables...')
+
     # Generate tables
     phase_1_moves = [(f, t) for f in range(6) for t in range(1, 4)]
     phase_2_moves = [(f, t) for [f, t] in phase_1_moves
