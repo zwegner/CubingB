@@ -138,7 +138,7 @@ def gen_sq1_diagram(sq1):
 
     # Generate middle
     s = 1 - P1
-    s2 = 2 - s if sq1.flipped else s
+    s2 = 2 - s if not sq1.flipped else s
     middle_l = gen_path([(0, 0), (0, s), (s, s), (s, 0)], 0, R)
     middle_r = gen_path([(0, 0), (0, s), (s2, s), (s2, 0)], 0,
             O if sq1.flipped else R)

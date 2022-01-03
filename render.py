@@ -457,6 +457,8 @@ def gen_cube_diagram(cube, transform='', type='normal', use_svg_tag=True):
                         result.append((color, paths[index]))
     # Collect color/coordinate pairs for a string diagram
     else:
+        if not cube:
+            cube = '-' * 27
         if type in {'pll', 'oll'}:
             coords = LL_COORDS 
 
