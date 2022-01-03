@@ -1166,13 +1166,13 @@ class SessionWidget(QWidget):
         self.puzzle_type_label = QLabel('3x3')
         self.scramble_selector = make_dropdown(SCRAMBLE_TYPES,
                 change=self.change_scramble_type)
-        attributes = QWidget(self)
-        make_hbox(attributes, [QLabel('Puzzle:'), self.puzzle_type_label,
+        self.attributes = QWidget(self)
+        make_hbox(self.attributes, [QLabel('Puzzle:'), self.puzzle_type_label,
                 QLabel('Scramble:'), self.scramble_selector])
 
         self.layout = make_grid(self, [
             [self.label, self.selector, new, edit],
-            [attributes],
+            [self.attributes],
             [self.stats],
             [self.table],
         ], stretch=[0, 1, 0, 0], margin=0)
@@ -1325,8 +1325,10 @@ class SessionWidget(QWidget):
 
             if self.playback_mode:
                 self.stats.hide()
+                self.attributes.hide()
             else:
                 self.stats.show()
+                self.attributes.show()
 
             if not solves:
                 self.update()
