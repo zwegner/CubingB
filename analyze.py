@@ -1003,7 +1003,7 @@ class GraphDialog(QDialog):
 
                         date = (datetime.date(1970, 1, 1) +
                                 datetime.timedelta(days=int(event.xdata)))
-                        i = binary_search(x, date)
+                        i = (date - x[0]).days
                         value = y[i] if i < len(x) and x[i] == date else 0
 
                         self.tooltip.set_text('%s, %s\n%s solves' % (name,
