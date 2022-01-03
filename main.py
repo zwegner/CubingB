@@ -1157,7 +1157,7 @@ class SessionWidget(QWidget):
         self.table.setStyleSheet('font: 16px')
         set_table_columns(self.table, ['Time', 'ao5', 'ao12'], stretch=-1)
 
-        self.table.cellDoubleClicked.connect(self.edit_solve)
+        self.table.cellDoubleClicked.connect(self.click_solve)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_ctx_menu)
 
@@ -1185,7 +1185,16 @@ class SessionWidget(QWidget):
         self.top_solves_viewer = TopSolvesDialog(self)
         self.playback_mode = False
 
-    def edit_solve(self, row, col):
+    def edit_solve(self, solve_id):
+        self.solve_editor.update_solve(solve_id)
+        # Start a DB session here just so we can rollback if the user cancels
+        with db.get_session() as session:
+            if self.solve_editor.exec():
+                self.trigger_update()
+            else:
+                session.rollback()
+
+    def click_solve(self, row, col):
         solve_id = self.table.item(row, 0).secret_data
         # Playback mode: just open the solve immediately
         if self.playback_mode:
@@ -1198,13 +1207,7 @@ class SessionWidget(QWidget):
 
         # Change behavior based on whether the click is on the single/ao5/ao12
         if col == 0:
-            self.solve_editor.update_solve(solve_id)
-            # Start a DB session here just so we can rollback if the user cancels
-            with db.get_session() as session:
-                if self.solve_editor.exec():
-                    self.trigger_update()
-                else:
-                    session.rollback()
+            self.edit_solve(solve_id)
         else:
             n_solves = 5 if col == 1 else 12
             self.show_average(solve_id, n_solves)
@@ -1344,11 +1347,10 @@ class SessionWidget(QWidget):
                     def make_stat_button(id, value):
                         value = ms_str(value)
                         if id is not None and size > 1:
-                            return make_button(value,
-                                    functools.partial(self.show_average, id, size),
-                                    border=False)
+                            fn = functools.partial(self.show_average, id, size)
                         else:
-                            return QLabel(value)
+                            fn = functools.partial(self.edit_solve, id)
+                        return make_button(value, fn, border=False)
                     mean = make_stat_button(solves[0].id,
                             sesh.cached_stats_current[stat])
                     best = make_stat_button(
