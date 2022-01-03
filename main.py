@@ -45,6 +45,7 @@ import analyze
 import bluetooth
 import config
 import db
+import fto
 import render
 import solver
 import sq1
@@ -63,6 +64,7 @@ SCRAMBLE_TYPES = ['Random state', 'Random Moves', 'Enter scramble', 'Hand Scramb
 
 SCRAMBLE_MOVES_3x3 = 25
 SCRAMBLE_MOVES_SQ1 = 20
+SCRAMBLE_MOVES_FTO = 30
 
 TIMER_DEBOUNCE = .3
 
@@ -489,6 +491,8 @@ class CubeWindow(QMainWindow):
                 self.scramble = []
         elif self.puzzle_type == 'sq1':
             self.scramble = sq1.gen_random_move_scramble(SCRAMBLE_MOVES_SQ1)
+        elif self.puzzle_type == 'fto':
+            self.scramble = fto.gen_random_move_scramble(SCRAMBLE_MOVES_FTO)
 
         if self.scramble:
             self.scramble_left = self.scramble[:]
@@ -1064,6 +1068,10 @@ class ScrambleViewWidget(QFrame):
             cube = sq1.Square1()
             cube.run_alg(scramble)
             diag = sq1.gen_sq1_diagram(cube)
+        elif puzzle_type == 'fto':
+            cube = fto.FTO()
+            cube.run_alg(scramble)
+            diag = fto.gen_fto_diagram(cube)
 
         self.diagram.load(diag.encode('ascii'))
 
