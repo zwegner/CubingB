@@ -991,7 +991,7 @@ class ScrambleWidget(QLabel):
         if link:
             scramble = self.scramble[:int(link) + 1]
             self.scramble_popup.set_scramble(scramble)
-            text = ' '.join(self.scramble_popup.get_b64_pics(self.diagram_size, 10))
+            text = ' '.join(self.scramble_popup.get_b64_pics(self.diagram_size))
             QToolTip.showText(QCursor.pos(), text)
 
     def set_scramble(self, scramble, scramble_left, scramble_message):
@@ -1023,19 +1023,16 @@ class ScrambleViewWidget(QFrame):
         super().__init__(parent)
 
         # Build layout for scramble view
-        self.svg_top = QSvgWidget()
-        self.svg_top.setFixedSize(size, size)
-        self.svg_bottom = QSvgWidget()
-        self.svg_bottom.setFixedSize(size, size)
+        self.diagram = QSvgWidget()
+        self.diagram.setFixedSize(size, size)
         make_grid(self, [
-            [self.svg_top, self.svg_bottom],
+            [self.diagram],
         ])
         self.setStyleSheet('ScrambleViewWidget { background-color: #bbb; '
                 'border: 2px solid #777; border-style: outset; } ')
 
     def resize(self, size):
-        self.svg_top.setFixedSize(size, size)
-        self.svg_bottom.setFixedSize(size, size)
+        self.diagram.setFixedSize(size * 2, size)
 
         self.update()
 
@@ -1044,14 +1041,11 @@ class ScrambleViewWidget(QFrame):
         if scramble:
             cube.run_alg(scramble)
 
-            top_diag = render.gen_cube_diagram(cube)
-            bottom_diag = render.gen_cube_diagram(cube.run_alg('x2 z'),
-                    transform='rotate(60)')
+            diag = render.gen_cube_double_diagram(cube)
         else:
-            top_diag = bottom_diag = render.gen_cube_diagram('-' * 27)
+            diag = render.gen_cube_double_diagram('-' * 27)
 
-        self.svg_top.load(top_diag.encode('ascii'))
-        self.svg_bottom.load(bottom_diag.encode('ascii'))
+        self.diagram.load(diag.encode('ascii'))
 
         self.update()
 
@@ -1059,23 +1053,21 @@ class ScrambleViewWidget(QFrame):
     # but this is seemingly required to get images in tooltips (and using widgets
     # as makeshift tooltips seemed even worse).
     # More info at https://stackoverflow.com/a/34300771
-    def get_b64_pics(self, size, margin):
-        for svg in [self.svg_top, self.svg_bottom]:
-            svg.setFixedSize(size, size)
-            isize = size + 2*margin
-            img = QImage(isize, isize, QImage.Format_RGB32)
-            img.fill(QColor(255, 255, 255))
-            ba = QByteArray()
-            buf = QBuffer(ba)
-            painter = QPainter(img)
-            svg.render(painter, QPoint(margin, margin), QRegion(),
-                    QWidget.RenderFlags(0))
-            # Uhh we get a segfault and this crazy warning without this del?!
-            # QPaintDevice: Cannot destroy paint device that is being painted
-            del painter
-            img.save(buf, 'PNG', 100)
-            data = bytes(ba.toBase64()).decode()
-            yield '<img src="data:image/png;base64, %s">' % data
+    def get_b64_pics(self, size):
+        self.diagram.setFixedSize(size * 2, size)
+        img = QImage(size * 2, size, QImage.Format_RGB32)
+        img.fill(QColor(255, 255, 255))
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        painter = QPainter(img)
+        self.diagram.render(painter, QPoint(0, 0), QRegion(),
+                QWidget.RenderFlags(0))
+        # Uhh we get a segfault and this crazy warning without this del?!
+        # QPaintDevice: Cannot destroy paint device that is being painted
+        del painter
+        img.save(buf, 'PNG', 100)
+        data = bytes(ba.toBase64()).decode()
+        yield '<img src="data:image/png;base64, %s">' % data
 
 # For a big session with thousands of solves, the solve table becomes really slow
 # to generate after every solve or whenever you change sessions. So instead, we
@@ -1497,7 +1489,7 @@ class SolveEditorDialog(QDialog):
     def hover_scramble(self, link):
         if link:
             self.scramble_popup.set_scramble(self.scramble)
-            text = ' '.join(self.scramble_popup.get_b64_pics(100, 10))
+            text = ' '.join(self.scramble_popup.get_b64_pics(100))
             QToolTip.showText(QCursor.pos(), text)
 
     def delete_solve(self):

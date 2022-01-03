@@ -434,7 +434,7 @@ def gen_svg_tables():
 
                         result[(index, i)] = path
 
-def gen_cube_diagram(cube, transform='', type='normal'):
+def gen_cube_diagram(cube, transform='', type='normal', use_svg_tag=True):
     result = []
     # Collect color/coordinate pairs for a regular cube
     if isinstance(cube, solver.Cube):
@@ -479,9 +479,29 @@ def gen_cube_diagram(cube, transform='', type='normal'):
             fill="{color}" stroke="black" stroke-width=".15" />'''
             for [color, path] in result]
 
-    return f'''<svg viewBox='-6.1 -6.1 12.2 12.2'>
+    cube = f'''
             <g transform="{transform}">
               {' '.join(cubies)}
+            </g>'''
+
+    if use_svg_tag:
+        cube = f"<svg viewBox='-6.1 -6.1 12.2 12.2'>{cube}</svg>"
+    return cube
+
+# Render top and bottom of cube side-by-side
+def gen_cube_double_diagram(cube):
+    if isinstance(cube, solver.Cube):
+        top_diag = gen_cube_diagram(cube, use_svg_tag=False)
+        bottom_diag = gen_cube_diagram(cube.run_alg('x2 z'),
+                transform='rotate(60)', use_svg_tag=False)
+    # Just a string: this is used
+    else:
+        top_diag = bottom_diag = gen_cube_diagram(cube, use_svg_tag=False)
+
+    return f'''<svg viewBox='-7 -7 28 14'>
+            {top_diag}
+            <g transform="translate(14, 0)">
+                {bottom_diag}
             </g>
         </svg>'''
 
