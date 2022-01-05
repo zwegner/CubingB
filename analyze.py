@@ -52,19 +52,30 @@ COLORS = ['yellow', 'red', 'orange', 'green', 'blue']
 OTHER_COLORS = ['black', 'grey', 'brown', 'purple', 'cyan', 'magenta']
 
 def calc_ao(all_times, start, size):
-    if len(all_times) - start < size:
-        mean = None
+    if start < size - 1:
+        return None
     else:
-        times = all_times[start:start+size]
+        times = all_times[start-size+1:start+1]
         if size >= 5:
             times.sort()
             outliers = (size * STAT_OUTLIER_PCT + 99) // 100
             times = times[outliers:-outliers]
-        mean = sum(times) / len(times)
+        return sum(times) / len(times)
 
-    return mean
+SESSION_ROLLING_CACHE = collections.defaultdict(dict)
 
-# Binary search helper, mainly used for calc_rolling_ao(). Slightly annoying in
+# Clear any cached information for this session, mainly used when e.g. solves
+# are edited or deleted
+def clear_session_caches(session):
+    # XXX might need to invalidate individual solve stats later, but for now
+    # when the 'best' stat cache is cleared it recalculates all solves
+    session.cached_stats_current = None
+    session.cached_stats_best = None
+
+    if session.id in SESSION_ROLLING_CACHE:
+        del SESSION_ROLLING_CACHE[session.id]
+
+# Binary search helper, mainly used for RollingAverage(). Slightly annoying in
 # that it needs to return the insertion position for new elements.
 def binary_search(l, i):
     lo = 0
@@ -81,123 +92,167 @@ def binary_search(l, i):
         return lo + 1
     return lo
 
-# Calculate the aoX for all solves. This is more efficient (at least for bigger X)
-# since it's incrementally updated, but the code is a bit annoying. We use a
-# binary search on the sorted solves within the sliding window, so overall the
-# runtime is O(n log size). This is also slightly weird in that the solves are
-# ordered new-to-old, so process them with the sliding window ahead of the current
-# solve rather than behind.
-def calc_rolling_ao(solves, all_times, size):
-    if len(solves) < size:
-        for _ in range(len(solves)):
-            yield None
-        return
+# To speed up rolling aoX calculations, we maintain a incrementally updated
+# sliding window of solve times. This is more efficient (at least for bigger
+# X), but the code is a bit annoying. We use a binary search on the sorted
+# solves within the sliding window, so overall the runtime is O(n log size).
+# This class maintains the state of the sliding window so we can keep it
+# around in memory and not need to reload a crapload of solves whenever a
+# new solve comes in.
+class RollingAverage:
+    def __init__(self, size, times=[]):
+        self.size = size
+        outliers = (size * STAT_OUTLIER_PCT + 99) // 100
+        self.low = outliers
+        self.high = size - outliers
+        self.n_samples = self.high - self.low
 
-    outliers = (size * STAT_OUTLIER_PCT + 99) // 100
-    low = outliers
-    high = size - outliers
-    n_samples = high - low
+        # Build initial sliding window, if we have enough solves
+        if len(times) >= size:
+            self.sliding_window = collections.deque(times[-size:])
+            self.sorted_times = list(sorted(self.sliding_window))
+            # Keep track of the sum of all solve times within the window
+            self.total = sum(self.sorted_times[self.low:self.high])
+        else:
+            self.sliding_window = collections.deque(times)
+            self.sorted_times = None
+            self.total = None
 
-    # Build initial list
-    times = list(sorted(all_times[:size]))
+        # Keep the last solve date so we can keep synchronized
+        self.last_solve_date = None
 
-    # Keep track of the sum of all solve times within the window
-    total = sum(times[low:high])
-    yield total / n_samples
+    def current(self):
+        if self.total is None:
+            return None
+        return self.total / self.n_samples
 
-    for i in range(len(solves) - size):
+    def update(self, new_time):
+        self.sliding_window.append(new_time)
+
+        # See if we just got a full sliding window's worth of solves
+        if self.sorted_times is None:
+            if len(self.sliding_window) == self.size:
+                self.sorted_times = list(sorted(self.sliding_window))
+                self.total = sum(self.sorted_times[self.low:self.high])
+                return self.total / self.n_samples
+            # Not enough solves yet, just return None
+            assert len(self.sliding_window) < self.size
+            return None
+
+        # Get the old time we're pushing out of the sliding window, and add the
+        # new time
+        old_time = self.sliding_window.popleft()
+
+        # Pull out some attributes for cleaner code below
+        [total, times, low, high] = [self.total, self.sorted_times,
+                self.low, self.high]
         assert not math.isnan(total)
         # Remove old solve time
-        old = all_times[i]
-        o = binary_search(times, old)
-        assert times[o] == old, (times, old, o)
+        o = binary_search(times, old_time)
+        assert times[o] == old_time, (times, old_time, o)
         times.pop(o)
 
         # Insert new solve
-        new = all_times[i + size]
-        n = binary_search(times, new)
-        times.insert(n, new)
+        n = binary_search(times, new_time)
+        times.insert(n, new_time)
 
         # Recalculate total if the average is moving from DNF to non-DNF. If
         # this happens a lot, it negates the speed advantage of this rolling
         # calculation. I guess that's punishment for having too many DNFs.
         if total == INF and times[high - 1] < INF:
             total = sum(times[low:high])
-            yield total / n_samples
-            continue
-
-        # Update total based on what solves moved in/out the window. There are
-        # 9 cases, with old and new each in high/mid/low
-
-        # Old in low
-        if o < low:
-            if n < low:
-                pass
-            elif n < high:
-                total += new
-                total -= times[low - 1]
-            else:
-                total += times[high - 1]
-                total -= times[low - 1]
-        # Old in mid
-        elif o < high:
-            total -= old
-            if n < low:
-                total += times[low]
-            elif n < high:
-                total += new
-            else:
-                total += times[high - 1]
-        # Old in high
         else:
-            if n < low:
-                total += times[low]
-                total -= times[high]
-            elif n < high:
-                total += new
-                total -= times[high]
+            # Update total based on what solves moved in/out the window. There
+            # are 9 cases, with old and new each in high/mid/low
+
+            # Old in low
+            if o < low:
+                if n < low:
+                    pass
+                elif n < high:
+                    total += new_time
+                    total -= times[low - 1]
+                else:
+                    total += times[high - 1]
+                    total -= times[low - 1]
+            # Old in mid
+            elif o < high:
+                total -= old_time
+                if n < low:
+                    total += times[low]
+                elif n < high:
+                    total += new_time
+                else:
+                    total += times[high - 1]
+            # Old in high
             else:
-                pass
+                if n < low:
+                    total += times[low]
+                    total -= times[high]
+                elif n < high:
+                    total += new_time
+                    total -= times[high]
+                else:
+                    pass
 
-        # Guard against inf-inf
-        if math.isnan(total):
-            total = INF
+            # Guard against inf-inf
+            if math.isnan(total):
+                total = INF
 
-        yield total / n_samples
+        self.total = total
+        return total / self.n_samples
 
-    # Yield None for all the solves before reaching the aoX
-    for _ in range(size - 1):
-        yield None
+    def feed_times(self, times):
+        for t in times:
+            yield self.update(t)
 
-def get_session_solves(session, sesh):
-    return (session.query(db.Solve).filter_by(session=sesh)
-            .order_by(db.Solve.created_at.desc()).all())
+def get_session_solves(session, sesh, newest_first=True, newer_than=None,
+        limit=None):
+    date = db.Solve.created_at
+    sort = date.desc() if newest_first else date.asc()
+    query = session.query(db.Solve).filter_by(session=sesh)
+    if newer_than:
+        query = query.filter(db.Solve.created_at > newer_than)
+    return query.order_by(sort).limit(limit).all()
 
-# Given a session and an ordered list of solves, update all single/aoX statistics
-def calc_session_stats(sesh, solves):
-    all_times = [solve_time(s) for s in solves]
+def get_session_solve_count(session, sesh):
+    return session.query(db.Solve).filter_by(session=sesh).count()
+
+# Given a DB session and a cubing session, update all single/aoX statistics
+def calc_session_stats(session, sesh):
+    solves = None
+    all_times = None
+    partial_solves = False
 
     stats_current = sesh.cached_stats_current or {}
     stats_best = sesh.cached_stats_best or {}
     stats_best_solve = sesh.cached_stats_best_solve_id or {}
     for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
         stat = stat_str(size)
-        mean = calc_ao(all_times, 0, size)
-        stats_current[stat] = mean
 
         # Update best stats, recalculating if necessary
         if stat not in stats_best:
             best = None
             best_id = None
 
-            averages = None
-            if size >= 5:
-                averages = iter(calc_rolling_ao(solves,
-                        all_times, size))
+            # Load solves if we need to
+            if all_times is None:
+                if solves is None or partial_solves:
+                    solves = get_session_solves(session, sesh, newest_first=False)
+                all_times = [solve_time(s) for s in solves]
 
-            for i in range(len(solves)):
+            averages = None
+            ctx = None
+            if size >= 5:
+                ctx = RollingAverage(size)
+                SESSION_ROLLING_CACHE[sesh.id][size] = ctx
+                averages = iter(ctx.feed_times(all_times))
+
+            for i in range(len(all_times)):
                 if size >= 5:
                     m = next(averages)
+                # For mo3, just do a direct calculation. There are no outliers
+                # anyways, so no need for the fancy incremental stuff
                 elif size > 1:
                     m = calc_ao(all_times, i, size)
                 else:
@@ -213,17 +268,59 @@ def calc_session_stats(sesh, solves):
                     best_id = solves[i].id
             stats_best[stat] = best
             stats_best_solve[stat] = best_id
+
+            # Mark the latest solve date in the rolling average for later updates
+            if ctx:
+                ctx.last_solve_date = solves[-1].created_at
         else:
             best = stats_best[stat]
-            if mean and (not best or mean < best):
-                best = stats_best[stat] = mean
-                stats_best_solve[stat] = solves[0].id
+
+        # Calculate newest stats. If we have a rolling average cached, we
+        # can just add the newest time(s) and update
+        if size >= 5 and size in SESSION_ROLLING_CACHE[sesh.id]:
+            ctx = SESSION_ROLLING_CACHE[sesh.id][size]
+            new_solves = get_session_solves(session, sesh, newest_first=False,
+                    newer_than=ctx.last_solve_date)
+            value = ctx.current()
+            for s in new_solves:
+                value = ctx.update(solve_time(s))
+                if not s.cached_stats:
+                    s.cached_stats = {}
+                s.cached_stats[stat] = value
+                ctx.last_solve_date = s.created_at
+        # Otherwise, grab the last N solves for starting the cache up.
+        else:
+            if solves is None:
+                # Get the *newest* solves and then reverse so the limit works
+                limit = STAT_AO_COUNTS[-1]
+                solves = get_session_solves(session, sesh, limit=limit)
+                solves = solves[::-1]
+
+                # Annoying handling for a case that'll probably never happen:
+                # mark that we didn't load all solves in case the 'best' calculation
+                # needs to run through every solve
+                partial_solves = len(solves) == limit
+
+            # Grab the last N solves and start an average
+            times = [solve_time(s) for s in solves[-size:]]
+            if size >= 5:
+                ctx = RollingAverage(size, times=times)
+                SESSION_ROLLING_CACHE[sesh.id][size] = ctx
+                value = ctx.current()
+                ctx.last_solve_date = solves[-1].created_at
+            else:
+                value = calc_ao(times, len(times) - 1, size)
+
+        stats_current[stat] = value
+        if value and (not best or value < best):
+            best = stats_best[stat] = value
+            stats_best_solve[stat] = solves[-1].id
 
     sesh.cached_stats_current = stats_current
     sesh.cached_stats_best = stats_best
     sesh.cached_stats_best_solve_id = stats_best_solve
     if solves:
-        solves[0].cached_stats = stats_current.copy()
+        solves[-1].cached_stats = stats_current.copy()
 
 # Smart cube analysis stuff
 

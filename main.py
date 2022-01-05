@@ -68,6 +68,8 @@ SCRAMBLE_MOVES_FTO = 30
 
 TIMER_DEBOUNCE = .3
 
+SOLVE_TABLE_INITIAL_SIZE = 40
+
 # Basic header to support future metadata/versioning/etc for smart data
 SMART_DATA_VERSION = 2
 
@@ -104,8 +106,7 @@ def show_merge_dialog(session, session_selector, msg, query, exclude_session=Non
 
         # Clear stat cache
         new_sesh = session.query_first(db.Session, id=merge_id)
-        new_sesh.cached_stats_current = None
-        new_sesh.cached_stats_best = None
+        analyze.clear_session_caches(new_sesh)
         return merge_id
     return None
 
@@ -1358,9 +1359,6 @@ class SessionWidget(QWidget):
 
             self.puzzle_type_label.setText(self.puzzle_type)
 
-            # Get solves
-            solves = analyze.get_session_solves(session, sesh)
-
             self.table.clearContents()
             self.table.setRowCount(0)
 
@@ -1378,6 +1376,10 @@ class SessionWidget(QWidget):
                 self.stats.show()
                 self.attributes.show()
 
+            # Get solves
+            limit = None if do_full_render else SOLVE_TABLE_INITIAL_SIZE
+            solves = analyze.get_session_solves(session, sesh, limit=limit)
+
             if not solves:
                 self.update()
                 return
@@ -1388,7 +1390,7 @@ class SessionWidget(QWidget):
                         self.show_top_solves, icon=True)
 
                 stat_table = [[None, QLabel('current'), QLabel('best'), top_btn]]
-                analyze.calc_session_stats(sesh, solves)
+                analyze.calc_session_stats(session, sesh)
                 for size in STAT_AO_COUNTS:
                     stat = stat_str(size)
                     graph_button = make_button('graph.svg',
@@ -1424,6 +1426,13 @@ class SessionWidget(QWidget):
                         self.parent.send_notification('This is your %s-solve '
                                 'reminder!' % n)
 
+            # If we only loaded the newest solves, get a total count to fix the
+            # solve numbers
+            offset = 0
+            if not do_full_render:
+                offset = analyze.get_session_solve_count(session, sesh)
+                offset -= SOLVE_TABLE_INITIAL_SIZE
+
             # Skip non-smart solves if we're in playback mode. We have the
             # skip logic here (as opposed to SQL) just to keep the solve
             # numbers the same
@@ -1431,13 +1440,13 @@ class SessionWidget(QWidget):
             for [i, solve] in enumerate(solves):
                 if self.playback_mode and solve.smart_data_raw is None:
                     continue
-                filtered_solves.append((len(solves) - i, solve))
+                filtered_solves.append((len(solves) - i + offset, solve))
 
             old_solves = filtered_solves
             # For a full render, we don't clear the first batch of solves that
             # are at the top of the table, but just append to the bottom
             if not do_full_render:
-                filtered_solves = filtered_solves[:40]
+                filtered_solves = filtered_solves[:SOLVE_TABLE_INITIAL_SIZE]
             is_full = (len(filtered_solves) == len(old_solves))
 
             # Build the table of actual solves
@@ -1458,8 +1467,8 @@ class SessionWidget(QWidget):
                 self.table.setItem(i, 1, cell(ms_str(stats.get('ao5'))))
                 self.table.setItem(i, 2, cell(ms_str(stats.get('ao12'))))
 
-            self.update()
-            return is_full
+        self.update()
+        return is_full
 
 class SolveEditorDialog(QDialog):
     def __init__(self, parent):
@@ -1524,11 +1533,7 @@ class SolveEditorDialog(QDialog):
             self.result_label.setText(solve_time_str(solve))
 
             # Invalidate statistics on session
-            # XXX might need to invalidate individual solve stats later, but
-            # for now when the 'best' stat cache is cleared it recalculates all
-            # solves
-            solve.session.cached_stats_current = None
-            solve.session.cached_stats_best = None
+            analyze.clear_session_caches(solve.session)
 
     def start_playback(self, solve_id, solve_nb):
         # HACK
@@ -1583,8 +1588,7 @@ class SolveEditorDialog(QDialog):
         if response == QMessageBox.Ok:
             with db.get_session() as session:
                 solve = session.query_first(db.Solve, id=self.solve_id)
-                solve.session.cached_stats_current = None
-                solve.session.cached_stats_best = None
+                analyze.clear_session_caches(solve.session)
 
                 session.query(db.Solve).filter_by(id=self.solve_id).delete()
             self.accept()
@@ -1936,8 +1940,7 @@ class SessionEditorDialog(QDialog):
                 for [i, [sesh, n_solves]] in enumerate(sessions):
                     # Calculate stats if there's no cache
                     if sesh.cached_stats_best is None:
-                        solves = analyze.get_session_solves(session, sesh)
-                        analyze.calc_session_stats(sesh, solves)
+                        analyze.calc_session_stats(session, sesh)
 
                     stats = sesh.cached_stats_best or {}
                     sesh_id = session_sort_key(sesh)
