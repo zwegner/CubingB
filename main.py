@@ -269,7 +269,7 @@ class CubeWindow(QMainWindow):
         self.bt_connected.connect(self.got_bt_connection)
 
         # Initialize session state asynchronously
-        self.schedule_fn.emit(self.session_widget.trigger_update)
+        self.async_session_load(notify=False)
 
     def run_scheduled_fn(self, fn):
         fn()
@@ -579,9 +579,15 @@ class CubeWindow(QMainWindow):
             self.timer = None
             self.timer_widget.update_time(final_time, 3)
 
+        self.async_session_load(notify=notify)
+
+    def async_session_load(self, notify=True):
         # Update session state asynchronously
-        self.schedule_fn.emit(functools.partial(self.session_widget.trigger_update,
-                notify=notify))
+        # XXX for some reason using QueuedConnection for schedule_fn isn't enough
+        # for this to actually happen asynchronously, so schedule from another
+        # thread. That seems to work...
+        sched_background_task(lambda: self.schedule_fn.emit(
+            functools.partial(self.session_widget.trigger_update, notify=notify)))
 
     # Smart cube stuff
 
