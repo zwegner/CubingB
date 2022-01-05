@@ -1174,6 +1174,7 @@ class SessionWidget(QWidget):
 
         self.ctx_menu = QMenu(self)
         add_menu_action(self.ctx_menu, 'Move to session...', self.move_selection)
+        add_menu_action(self.ctx_menu, 'Delete solves...', self.delete_selection)
 
         self.table = LazyTable(lambda: self.trigger_update(do_full_render=True))
         self.table.setStyleSheet('font: 16px')
@@ -1263,6 +1264,21 @@ class SessionWidget(QWidget):
             merge_id = show_merge_dialog(session, self.session_selector, msg,
                     query, allow_new=True)
             if merge_id is not None:
+                self.trigger_update()
+
+    def delete_selection(self):
+        with db.get_session() as session:
+            rows = {item.row() for item in self.table.selectedItems()}
+            solves = [self.table.item(row, 0).secret_data for row in rows]
+
+            response = QMessageBox.question(self, 'Confirm delete',
+                    'Are you sure you want to delete the %s selected solve(s)? '
+                    'This cannot be undone!' % len(solves),
+                    QMessageBox.Ok | QMessageBox.Cancel)
+            if response == QMessageBox.Ok:
+                session.query(db.Solve).filter(db.Solve.id.in_(solves)).delete()
+                sesh = session.query_first(db.Settings).current_session
+                analyze.clear_session_caches(sesh)
                 self.trigger_update()
 
     def new_session(self):
