@@ -141,6 +141,8 @@ class CubeWindow(QMainWindow):
         self.smart_device = None
         self.mode = None
         self.cached_scramble = None
+        self.lock = threading.Lock()
+        self.is_bg_scramble_gen = False
 
         # Initialize DB and make sure there's a current session
         db.init_db(config.DB_PATH)
@@ -445,13 +447,21 @@ class CubeWindow(QMainWindow):
         self.stop_pending(True)
 
     def async_gen_scramble(self):
+        with self.lock:
+            if self.is_bg_scramble_gen:
+                return
+            self.is_bg_scramble_gen = True
+
         scramble = solver.gen_random_state_scramble()
 
-        # Let's hope nothing weird has happened in the meantime
-        if self.cached_scramble is None:
-            self.cached_scramble = scramble
+        with self.lock:
+            self.is_bg_scramble_gen = False
 
-            self.schedule_fn.emit(self.gen_scramble)
+            # Let's hope nothing weird has happened in the meantime
+            if self.cached_scramble is None:
+                self.cached_scramble = scramble
+
+                self.schedule_fn.emit(self.gen_scramble)
 
     def gen_scramble(self):
         self.reset()
