@@ -1397,8 +1397,7 @@ class SessionWidget(QWidget):
 
                 stat_table = [[None, QLabel('current'), QLabel('best'), top_btn]]
                 analyze.calc_session_stats(session, sesh)
-                for size in STAT_AO_COUNTS:
-                    stat = stat_str(size)
+                for [size, stat] in STAT_AO_COUNTS_STR:
                     graph_button = make_button('graph.svg',
                             functools.partial(self.show_graph, size), icon=True)
                     # Dumb helper to reduce repeated code a bit
@@ -1420,8 +1419,7 @@ class SessionWidget(QWidget):
 
                 # Check if this solve broke a record
                 if notify:
-                    for size in STAT_AO_COUNTS:
-                        stat = stat_str(size)
+                    for [size, stat] in STAT_AO_COUNTS_STR:
                         last_solve = solves[0].id
                         if sesh.cached_stats_best_solve_id.get(stat) == last_solve:
                             self.parent.send_notification('Session best %s!' % stat)
@@ -1833,13 +1831,13 @@ class SessionEditorDialog(QDialog):
         self.ctx_menu = QMenu(self)
         add_menu_action(self.ctx_menu, 'View top solves',
                 functools.partial(self.view_top_selection))
-        for s in STAT_AO_COUNTS:
-            add_menu_action(self.ctx_menu, 'Graph %s' % stat_str(s),
+        for [s, stat] in STAT_AO_COUNTS_STR:
+            add_menu_action(self.ctx_menu, 'Graph %s' % stat,
                     functools.partial(self.graph_selection, s))
 
         self.table = ReorderTableWidget(self, self.rows_reordered)
         columns = ['Name', 'Puzzle', '# Solves', 'Solve Reminder']
-        columns += [stat_str(stat) for stat in STAT_AO_COUNTS]
+        columns += STAT_AO_STR
 
         set_table_columns(self.table, columns, stretch=0)
 
@@ -1959,11 +1957,9 @@ class SessionEditorDialog(QDialog):
                     self.table.setItem(i, 3, cell(str(sesh.notify_every_n_solves or ''),
                             editable=True,
                             secret_data=(sesh.id, 'notify_every_n_solves', int)))
-                    for [j, stat] in enumerate(STAT_AO_COUNTS):
-                        stat = stat_str(stat)
-                        self.table.setItem(i, 4+j,
-                                cell(ms_str(stats.get(stat))))
-                    offset = 4 + len(STAT_AO_COUNTS)
+                    for [j, stat] in enumerate(STAT_AO_STR):
+                        self.table.setItem(i, 4+j, cell(ms_str(stats.get(stat))))
+                    offset = 4 + len(STAT_AO_STR)
                     button = make_button('Merge...',
                             functools.partial(self.merge_sessions, sesh.id))
                     self.table.setCellWidget(i, offset+0, button)

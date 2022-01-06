@@ -63,6 +63,7 @@ def calc_ao(all_times, start, size):
         return sum(times) / len(times)
 
 SESSION_ROLLING_CACHE = collections.defaultdict(dict)
+SESSION_ROLLING_CACHE_DATE = {}
 
 # Clear any cached information for this session, mainly used when e.g. solves
 # are edited or deleted
@@ -74,6 +75,7 @@ def clear_session_caches(session):
 
     if session.id in SESSION_ROLLING_CACHE:
         del SESSION_ROLLING_CACHE[session.id]
+        del SESSION_ROLLING_CACHE_DATE[session.id]
 
 # Binary search helper, mainly used for RollingAverage(). Slightly annoying in
 # that it needs to return the insertion position for new elements.
@@ -117,9 +119,6 @@ class RollingAverage:
             self.sliding_window = collections.deque(times)
             self.sorted_times = None
             self.total = None
-
-        # Keep the last solve date so we can keep synchronized
-        self.last_solve_date = None
 
     def current(self):
         if self.total is None:
@@ -218,26 +217,29 @@ def get_session_solves(session, sesh, newest_first=True, newer_than=None,
 def get_session_solve_count(session, sesh):
     return session.query(db.Solve).filter_by(session=sesh).count()
 
-# Given a DB session and a cubing session, update all single/aoX statistics
+# Given a DB session and a cubing session, update all single/aoX statistics.
+# This is rather annoyingly complicated, all for the purpose of being fast,
+# loading very little from the database in most cases. There's all the weird
+# cases handled in the RollingAverage class, but also lots of code for keeping
+# the caches (both in-memory and database) in sync.
 def calc_session_stats(session, sesh):
     solves = None
     all_times = None
-    partial_solves = False
 
     stats_current = sesh.cached_stats_current or {}
     stats_best = sesh.cached_stats_best or {}
     stats_best_solve = sesh.cached_stats_best_solve_id or {}
-    for [stat_idx, size] in enumerate(STAT_AO_COUNTS):
-        stat = stat_str(size)
 
-        # Update best stats, recalculating if necessary
+    # Check that the 'best' stats are up to date in the database cache. If not,
+    # we have to load all the solves and do a rolling calculation for each stat.
+    for [size, stat] in STAT_AO_COUNTS_STR:
         if stat not in stats_best:
             best = None
             best_id = None
 
             # Load solves if we need to
             if all_times is None:
-                if solves is None or partial_solves:
+                if solves is None:
                     solves = get_session_solves(session, sesh, newest_first=False)
                 all_times = [solve_time(s) for s in solves]
 
@@ -248,6 +250,8 @@ def calc_session_stats(session, sesh):
                 SESSION_ROLLING_CACHE[sesh.id][size] = ctx
                 averages = iter(ctx.feed_times(all_times))
 
+            last_date = None
+            last_time = None
             for i in range(len(all_times)):
                 if size >= 5:
                     m = next(averages)
@@ -266,56 +270,78 @@ def calc_session_stats(session, sesh):
                 if m and (not best or m < best):
                     best = m
                     best_id = solves[i].id
+                last_time = m
+                last_date = solves[i].created_at
+
+            # Update cache to go in the database later
             stats_best[stat] = best
             stats_best_solve[stat] = best_id
+            stats_current[stat] = last_time
+            SESSION_ROLLING_CACHE_DATE[sesh.id] = last_date
 
-            # Mark the latest solve date in the rolling average for later updates
-            if ctx:
-                ctx.last_solve_date = solves[-1].created_at
-        else:
-            best = stats_best[stat]
+    # Calculate newest stats. If we have a rolling average cached, we can just
+    # add the newest time(s) and update. We pull all solves from the database
+    # newer than the last seen date. Also, we keep track of the number of solves
+    # we need to pull afterwards (max_stat_size) for starting the cache, or for
+    # computing the stats that don't use rolling caches
+    if sesh.id in SESSION_ROLLING_CACHE:
+        date = SESSION_ROLLING_CACHE_DATE[sesh.id]
+        new_solves = get_session_solves(session, sesh, newest_first=False,
+                newer_than=date)
 
-        # Calculate newest stats. If we have a rolling average cached, we
-        # can just add the newest time(s) and update
-        if size >= 5 and size in SESSION_ROLLING_CACHE[sesh.id]:
-            ctx = SESSION_ROLLING_CACHE[sesh.id][size]
-            new_solves = get_session_solves(session, sesh, newest_first=False,
-                    newer_than=ctx.last_solve_date)
-            value = ctx.current()
-            for s in new_solves:
-                value = ctx.update(solve_time(s))
-                if not s.cached_stats:
-                    s.cached_stats = {}
-                s.cached_stats[stat] = value
-                ctx.last_solve_date = s.created_at
-        # Otherwise, grab the last N solves for starting the cache up.
-        else:
-            if solves is None:
-                # Get the *newest* solves and then reverse so the limit works
-                limit = STAT_AO_COUNTS[-1]
-                solves = get_session_solves(session, sesh, limit=limit)
-                solves = solves[::-1]
+        max_stat_size = 0
 
-                # Annoying handling for a case that'll probably never happen:
-                # mark that we didn't load all solves in case the 'best' calculation
-                # needs to run through every solve
-                partial_solves = len(solves) == limit
+        for [size, stat] in STAT_AO_COUNTS_STR:
+            if size >= 5:
+                ctx = SESSION_ROLLING_CACHE[sesh.id][size]
+                value = ctx.current()
+                for s in new_solves:
+                    value = ctx.update(solve_time(s))
+                    if s.cached_stats is None:
+                        s.cached_stats = {}
+                    s.cached_stats[stat] = value
+                stats_current[stat] = value
+            elif size > max_stat_size:
+                max_stat_size = size
+    else:
+        max_stat_size = STAT_AO_COUNTS[-1]
 
-            # Grab the last N solves and start an average
-            times = [solve_time(s) for s in solves[-size:]]
+    # Grab the last N solves for starting the cache up. If the in-memory cache
+    # is empty for this session, we get the maximum stat size (now ao1000).
+    # Otherwise, we get biggest size that doesn't use the rolling cache (now mo3).
+    times = None
+    partial_solves = False
+    if solves is None:
+        # Get the *newest* solves and then reverse so the limit works
+        solves = get_session_solves(session, sesh, limit=max_stat_size)
+        solves = solves[::-1]
+        partial_solves = True
+    times = [solve_time(s) for s in solves[-max_stat_size:]]
+
+    # Calculate new averages, either rolling if it's not cached or single/mo3
+    for [size, stat] in STAT_AO_COUNTS_STR:
+        if size <= max_stat_size:
             if size >= 5:
                 ctx = RollingAverage(size, times=times)
                 SESSION_ROLLING_CACHE[sesh.id][size] = ctx
                 value = ctx.current()
-                ctx.last_solve_date = solves[-1].created_at
             else:
                 value = calc_ao(times, len(times) - 1, size)
+            stats_current[stat] = value
 
-        stats_current[stat] = value
-        if value and (not best or value < best):
-            best = stats_best[stat] = value
+    # Mark the latest solve date in the rolling average for later updates
+    if solves:
+        SESSION_ROLLING_CACHE_DATE[sesh.id] = solves[-1].created_at
+
+    # Now update best stat for each size
+    for [size, stat] in STAT_AO_COUNTS_STR:
+        best = stats_best[stat]
+        current = stats_current[stat]
+        if current and (not best or current < best):
+            best = stats_best[stat] = current
             stats_best_solve[stat] = solves[-1].id
 
+    # Update session with cached stats
     sesh.cached_stats_current = stats_current
     sesh.cached_stats_best = stats_best
     sesh.cached_stats_best_solve_id = stats_best_solve
@@ -996,7 +1022,7 @@ class GraphDialog(QDialog):
 
         stat_label = QLabel('Stat:')
         # Build a dropdown and lookup tables for stats
-        self.stat_table = [stat_str(s) for s in STAT_AO_COUNTS]
+        self.stat_table = STAT_AO_STR
         self.stat_table.append('Solves per day')
         self.inv_stat_table = STAT_AO_COUNTS + ['count']
         self.stat_selector = make_dropdown(self.stat_table,
