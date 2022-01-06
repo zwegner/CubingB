@@ -99,8 +99,11 @@ class Solve(Base, NiceBase):
     segment_time_ms = Column(JSON)
     # Rolling stats for the containing session
     cached_stats = Column(JSON)
+    # Sequential ID within the solve's session. Easier to just cache it here
+    solve_nb = Column(Integer)
 
 Index('solve_session_idx', Solve.session_id, Solve.created_at)
+Index('solve_nb_idx', Solve.solve_nb)
 
 class AlgCase(Base, NiceBase):
     __tablename__ = 'alg_cases'

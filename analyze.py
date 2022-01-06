@@ -205,23 +205,26 @@ class RollingAverage:
         for t in times:
             yield self.update(t)
 
-def get_session_solves(session, sesh, newest_first=True, newer_than=None,
-        limit=None):
+def get_session_solves(session, sesh, *filter_args, newest_first=True,
+        newer_than=None, limit=None, **filter_kwargs):
     date = db.Solve.created_at
     sort = date.desc() if newest_first else date.asc()
     query = session.query(db.Solve).filter_by(session=sesh)
     if newer_than:
         query = query.filter(db.Solve.created_at > newer_than)
+    query = query.filter(*filter_args, **filter_kwargs)
     return query.order_by(sort).limit(limit).all()
 
 def get_session_solve_count(session, sesh):
+    if 'solve_count' in sesh.cached_stats_best:
+        return sesh.cached_stats_best['solve_count']
     return session.query(db.Solve).filter_by(session=sesh).count()
 
 # Given a DB session and a cubing session, update all single/aoX statistics.
 # This is rather annoyingly complicated, all for the purpose of being fast,
 # loading very little from the database in most cases. There's all the weird
 # cases handled in the RollingAverage class, but also lots of code for keeping
-# the caches (both in-memory and database) in sync.
+# the caches (both in-memory and database) in sync, and also caching solve numbers.
 def calc_session_stats(session, sesh):
     solves = None
     all_times = None
@@ -340,6 +343,30 @@ def calc_session_stats(session, sesh):
         if current and (not best or current < best):
             best = stats_best[stat] = current
             stats_best_solve[stat] = solves[-1].id
+
+    # Also, calculate solve numbers within a session. This is kind of annoying,
+    # but we don't want to have to run weird SQL queries to get solve numbers,
+    # and I could not manage to get bulk solve number calculations to be efficient
+    # *at all* with SQLAlchemy/SQLite. So instead of that "clean" solution, we
+    # keep solve numbers cached in the solve entries, along with a "current solve
+    # number" in the stats_best dict. This allows us to detect cache clearing (like
+    # when a solve is deleted) and re-run the solve numbering.
+    if 'solve_count' not in stats_best:
+        if solves is None or partial_solves:
+            solves = get_session_solves(session, sesh, newest_first=False)
+            partial_solves = False
+        offset = 0
+    else:
+        # Solve numbers are mostly good, but grab any new unnumbered solves.
+        # This will probably always be the same as the 'new_solves' variable
+        # used above, but keeping those in sync would be weird
+        solves = get_session_solves(session, sesh, db.Solve.solve_nb == None,
+                newest_first=False)
+        offset = stats_best['solve_count']
+
+    for [i, s] in enumerate(solves):
+        s.solve_nb = i + offset + 1
+    stats_best['solve_count'] = len(solves) + offset
 
     # Update session with cached stats
     sesh.cached_stats_current = stats_current

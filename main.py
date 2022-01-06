@@ -75,12 +75,6 @@ SMART_DATA_VERSION = 2
 
 # UI helpers
 
-# Get the solve number (i.e. the number within the session, not the
-# database id)
-def get_solve_nb(session, solve):
-    return (session.query(db.Solve).filter_by(session=solve.session)
-            .filter(db.Solve.created_at <= solve.created_at).count())
-
 # A slightly weird abstraction: show a session selector dialog (already created
 # by the caller), and if the user confirms, merge all the solves in the given
 # query into the selected session, all in a given db session. Returns whether
@@ -1240,9 +1234,8 @@ class SessionWidget(QWidget):
         if self.playback_mode:
             with db.get_session() as session:
                 solve = session.query_first(db.Solve, id=solve_id)
-                solve_nb = get_solve_nb(session, solve)
                 self.parent.schedule_fn_args.emit(window.start_playback,
-                        (solve_id, solve_nb))
+                        (solve_id, solve.solve_nb))
             return
 
         # Change behavior based on whether the click is on the single/ao5/ao12
@@ -1384,7 +1377,8 @@ class SessionWidget(QWidget):
 
             # Get solves
             limit = None if do_full_render else SOLVE_TABLE_INITIAL_SIZE
-            solves = analyze.get_session_solves(session, sesh, limit=limit)
+            args = [db.Solve.smart_data_raw != None] if self.playback_mode else []
+            solves = analyze.get_session_solves(session, sesh, *args, limit=limit)
 
             if not solves:
                 self.update()
@@ -1426,44 +1420,24 @@ class SessionWidget(QWidget):
 
                     # ...or if the n-solve reminder is here
                     n = sesh.notify_every_n_solves
-                    if n and len(solves) % n == 0:
-                        self.parent.send_notification('This is your %s-solve '
-                                'reminder!' % n)
+                    if n:
+                        count = analyze.get_session_solve_count(session, sesh)
+                        if count % n == 0:
+                            self.parent.send_notification('This is your %s-solve '
+                                    'reminder!' % n)
 
-            # If we only loaded the newest solves, get a total count to fix the
-            # solve numbers
-            offset = 0
-            if not do_full_render:
-                offset = analyze.get_session_solve_count(session, sesh)
-                offset -= SOLVE_TABLE_INITIAL_SIZE
-
-            # Skip non-smart solves if we're in playback mode. We have the
-            # skip logic here (as opposed to SQL) just to keep the solve
-            # numbers the same
-            filtered_solves = []
-            for [i, solve] in enumerate(solves):
-                if self.playback_mode and solve.smart_data_raw is None:
-                    continue
-                filtered_solves.append((len(solves) - i + offset, solve))
-
-            old_solves = filtered_solves
+            old_solves = solves
             # For a full render, we don't clear the first batch of solves that
             # are at the top of the table, but just append to the bottom
             if not do_full_render:
-                filtered_solves = filtered_solves[:SOLVE_TABLE_INITIAL_SIZE]
-            is_full = (len(filtered_solves) == len(old_solves))
+                solves = solves[:SOLVE_TABLE_INITIAL_SIZE]
+            is_full = (len(solves) == len(old_solves))
 
             # Build the table of actual solves
-            self.table.setRowCount(len(filtered_solves))
+            self.table.setRowCount(len(solves))
 
-            for [i, [n, solve]] in enumerate(filtered_solves):
-                # Skip non-smart solves if we're in playback mode. We have the
-                # skip logic here (as opposed to SQL) just to keep the solve
-                # numbers the same
-                if self.playback_mode and solve.smart_data_raw is None:
-                    continue
-                self.table.setVerticalHeaderItem(i,
-                        cell('%s' % n))
+            for [i, solve] in enumerate(solves):
+                self.table.setVerticalHeaderItem(i, cell('%s' % solve.solve_nb))
                 # HACK: set the secret data so the solve editor gets the ID
                 self.table.setItem(i, 0, cell(ms_str(solve_time(solve)),
                         secret_data=solve.id))
@@ -1571,9 +1545,8 @@ class SolveEditorDialog(QDialog):
             if self.smart_widget:
                 self.layout.removeWidget(self.smart_widget)
             if solve.smart_data_raw:
-                solve_nb = get_solve_nb(session, solve)
                 self.smart_widget = make_button('View Playback',
-                        lambda: self.start_playback(solve_id, solve_nb))
+                        lambda: self.start_playback(solve_id, solve.solve_nb))
             else:
                 self.smart_widget = QLabel('None')
             self.layout.addWidget(self.smart_widget, 6, 1)
@@ -1600,7 +1573,7 @@ class SolveEditorDialog(QDialog):
     def move_solve(self):
         with db.get_session() as session:
             solve = session.query_first(db.Solve, id=self.solve_id)
-            msg = 'Move solve %s to session:' % get_solve_nb(session, solve)
+            msg = 'Move solve %s to session:' % solve.solve_nb
             query = session.query(db.Solve).filter_by(id=self.solve_id)
 
             merge_id = show_merge_dialog(session, self.session_selector, msg,
