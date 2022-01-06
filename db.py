@@ -48,6 +48,8 @@ class MutableJSON(Mutable, dict):
             return value
         if isinstance(value, dict):
             return MutableJSON(value)
+        elif isinstance(value, list):
+            return MutableJSONList(value)
         raise ValueError()
 
     def __setitem__(self, key, value):
@@ -57,6 +59,15 @@ class MutableJSON(Mutable, dict):
     def __delitem__(self, key):
         self.changed()
         dict.__delitem__(self, key)
+
+class MutableJSONList(Mutable, list):
+    def __setitem__(self, key, value):
+        self.changed()
+        list.__setitem__(self, key, value)
+
+    def __delitem__(self, key):
+        self.changed()
+        list.__delitem__(self, key)
 
 JSON = MutableJSON.as_mutable(JSON_)
 
