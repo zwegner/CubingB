@@ -17,6 +17,8 @@
 
 import random
 
+from util import PuzzleDefs, ScrambleType
+
 [U, D, F, B, BL, R, BR, L] = range(8)
 CORNERS = [(U, R, F, L), (U, B, BR, R), (R, BR, D, F),
         (F, D, BL, L), (L, BL, B, U), (B, BL, D, BR)]
@@ -204,22 +206,38 @@ def gen_turns():
 
 gen_turns()
 
-def gen_random_move_scramble(length):
-    scramble = []
-    all_faces = set(range(8))
-    blocked_faces = set()
-    turns = [1, 2]
-    for i in range(length):
-        face = random.choice(list(all_faces - blocked_faces))
-        # Only allow one turn of each of an opposing pair of faces in a row.
-        # E.g. F B' is allowed, F B' F is not
-        if face ^ 1 not in blocked_faces:
-            blocked_faces = set()
-        blocked_faces.add(face)
+class PuzzleDefsFTO(PuzzleDefs):
+    SCRAMBLE_MOVES_FTO = 30
+    def supported_scrambles(self):
+        return [ScrambleType.RANDOM_MOVES,
+                ScrambleType.ENTER_SCRAMBLE, ScrambleType.HAND_SCRAMBLE]
 
-        turn = random.choice(turns)
-        scramble.append(move_str(face, turn))
-    return scramble
+    def gen_random_moves(self):
+        scramble = []
+        all_faces = set(range(8))
+        blocked_faces = set()
+        turns = [1, 2]
+        for i in range(self.SCRAMBLE_MOVES_FTO):
+            face = random.choice(list(all_faces - blocked_faces))
+            # Only allow one turn of each of an opposing pair of faces in a row.
+            # E.g. F B' is allowed, F B' F is not
+            if face ^ 1 not in blocked_faces:
+                blocked_faces = set()
+            blocked_faces.add(face)
+
+            turn = random.choice(turns)
+            scramble.append(move_str(face, turn))
+        return scramble
+
+    def parse_scramble(self, scramble):
+        if all(m in MOVE_FN for m in scramble):
+            return scramble
+        return None
+
+    def gen_diagram(self, scramble):
+        fto = FTO()
+        fto.run_alg(scramble)
+        return gen_fto_diagram(fto)
 
 ################################################################################
 ## SVG rendering stuff #########################################################

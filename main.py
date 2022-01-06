@@ -23,7 +23,6 @@ import functools
 import gzip
 import os
 import pstats
-import queue
 import random
 import struct
 import sys
@@ -58,13 +57,15 @@ WINDOW_SIZE = [1600, 1000]
 Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK ALG_TRAIN ALG_VIEW', start=0)
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
         'SMART_SCRAMBLED SMART_SOLVING')
-ScrambleType = enum.IntEnum('ScrambleType', 'RANDOM_STATE RANDOM_MOVES '
-        'ENTER_SCRAMBLE HAND_SCRAMBLE', start=0)
-SCRAMBLE_TYPES = ['Random state', 'Random Moves', 'Enter scramble', 'Hand Scramble']
 
-SCRAMBLE_MOVES_3x3 = 25
-SCRAMBLE_MOVES_SQ1 = 20
-SCRAMBLE_MOVES_FTO = 30
+PUZZLES = {
+    '3x3': solver.PuzzleDefs3x3(),
+    'sq1': sq1.PuzzleDefsSq1(),
+    'fto': fto.PuzzleDefsFTO(),
+}
+# Add big cube scrambles. Do people ever do machine-generated scrambles on 10x10+?
+for i in range(4, 10):
+    PUZZLES['%sx%s' % (i, i)] = solver.PuzzleDefsBigCube(i)
 
 TIMER_DEBOUNCE = .3
 
@@ -104,17 +105,6 @@ def show_merge_dialog(session, session_selector, msg, query, exclude_session=Non
         return merge_id
     return None
 
-# For certain tasks that take a long time, we put them in a queue for a background
-# thread to run
-BACKGROUND_QUEUE = queue.Queue()
-def sched_background_task(fn):
-    BACKGROUND_QUEUE.put(fn)
-
-def run_background_thread():
-    while True:
-        task = BACKGROUND_QUEUE.get()
-        task()
-
 # Giant main class that handles the main window, receives bluetooth messages,
 # deals with cube logic, etc.
 class CubeWindow(QMainWindow):
@@ -135,9 +125,6 @@ class CubeWindow(QMainWindow):
         self.pending_timer = None
         self.smart_device = None
         self.mode = None
-        self.cached_scramble = None
-        self.lock = threading.Lock()
-        self.is_bg_scramble_gen = False
 
         # Initialize DB and make sure there's a current session
         db.init_db(config.DB_PATH)
@@ -441,26 +428,10 @@ class CubeWindow(QMainWindow):
     def set_pending(self):
         self.stop_pending(True)
 
-    def async_gen_scramble(self):
-        with self.lock:
-            if self.is_bg_scramble_gen:
-                return
-            self.is_bg_scramble_gen = True
-
-        scramble = solver.gen_random_state_scramble()
-
-        with self.lock:
-            self.is_bg_scramble_gen = False
-
-            # Let's hope nothing weird has happened in the meantime
-            if self.cached_scramble is None:
-                self.cached_scramble = scramble
-
-                self.schedule_fn.emit(self.gen_scramble)
-
     def gen_scramble(self):
         self.reset()
         self.puzzle_type = self.session_widget.puzzle_type
+        self.puzzle = PUZZLES[self.puzzle_type]
         if self.smart_device and self.puzzle_type == '3x3':
             self.state = State.SMART_SCRAMBLING
         else:
@@ -472,32 +443,23 @@ class CubeWindow(QMainWindow):
         self.scramble = None
         self.scramble_message = None
         type = self.session_widget.scramble_type
-        if type == ScrambleType.RANDOM_STATE and self.puzzle_type == '3x3':
-            if self.cached_scramble:
-                self.scramble = self.cached_scramble
-            else:
-                sched_background_task(self.async_gen_scramble)
+        if type not in self.puzzle.supported_scrambles():
+            self.scramble_message = 'Scramble by hand now.'
+            self.scramble = []
+        elif type == ScrambleType.RANDOM_STATE:
+            callback = functools.partial(self.schedule_fn.emit, self.gen_scramble)
+            self.scramble = self.puzzle.random_state_scramble(callback)
+            if not self.scramble:
                 self.scramble_message = 'Generating scramble...'
         elif type == ScrambleType.RANDOM_MOVES:
-            if self.puzzle_type == '3x3':
-                self.scramble = solver.gen_random_move_scramble(SCRAMBLE_MOVES_3x3)
-            elif self.puzzle_type == 'sq1':
-                self.scramble = sq1.gen_random_move_scramble(SCRAMBLE_MOVES_SQ1)
-            elif self.puzzle_type == 'fto':
-                self.scramble = fto.gen_random_move_scramble(SCRAMBLE_MOVES_FTO)
-            elif self.puzzle_type[0].isdigit():
-                self.scramble = solver.gen_big_cube_scramble(self.puzzle_type)
-            else:
-                self.scramble_message = 'Scramble by hand now.'
-                self.scramble = []
+            self.scramble = self.puzzle.random_move_scramble()
         elif type == ScrambleType.ENTER_SCRAMBLE:
             [scramble, ok] = QInputDialog.getText(self, 'Enter scramble',
                     'Enter scramble:')
             if ok:
                 scramble = scramble.split()
-                if solver.validate_scramble(scramble):
-                    self.scramble = scramble
-                else:
+                self.scramble = self.puzzle.parse_scramble(scramble)
+                if not self.scramble:
                     self.scramble_message = 'Maybe try entering a VALID scramble?'
             else:
                 self.scramble_message = 'Enter a scramble please.'
@@ -553,16 +515,13 @@ class CubeWindow(QMainWindow):
                         *self.smart_start_turns)
                 data = header + data
 
-            if self.puzzle_type == 'sq1':
-                scramble = ' '.join(sq1.alg_str(self.scramble))
-            else:
-                scramble = ' '.join(self.scramble)
+            scramble = self.puzzle.alg_str(self.scramble)
 
             session.insert(db.Solve, session=sesh, scramble=scramble,
                     time_ms=int(final_time * 1000), dnf=dnf,
                     smart_data_raw=data)
 
-        self.cached_scramble = None
+        self.puzzle.clear_cached_scramble()
         self.gen_scramble()
         return final_time
 
@@ -601,9 +560,9 @@ class CubeWindow(QMainWindow):
             self.smart_data_copy = None
 
     def mark_scramble_changed(self):
-        self.scramble_widget.set_scramble(self.puzzle_type, self.scramble,
+        self.scramble_widget.set_scramble(self.puzzle, self.scramble,
                 self.scramble_left, self.scramble_message)
-        self.scramble_view_widget.set_scramble(self.puzzle_type, self.scramble)
+        self.scramble_view_widget.set_scramble(self.puzzle, self.scramble)
         self.update()
 
     # Notify the cube widget that we've updated. We copy all the rendering
@@ -1004,7 +963,7 @@ class ScrambleWidget(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
         self.scramble = None
-        self.puzzle_type = None
+        self.puzzle = None
         self.diagram_size = 100
         self.size_div = 1
 
@@ -1029,12 +988,12 @@ class ScrambleWidget(QLabel):
     def hover_move(self, link):
         if link:
             scramble = self.scramble[:int(link) + 1]
-            self.scramble_popup.set_scramble(self.puzzle_type, scramble)
+            self.scramble_popup.set_scramble(self.puzzle, scramble)
             text = self.scramble_popup.get_b64_pics(self.diagram_size)
             QToolTip.showText(QCursor.pos(), text)
 
-    def set_scramble(self, puzzle_type, scramble, scramble_left, scramble_message):
-        self.puzzle_type = puzzle_type
+    def set_scramble(self, puzzle, scramble, scramble_left, scramble_message):
+        self.puzzle = puzzle
         if not scramble:
             self.size_div = 1
             self.setup_font()
@@ -1047,11 +1006,8 @@ class ScrambleWidget(QLabel):
         left = ['-'] * len(scramble)
         for i in range(min(len(left), len(scramble_left))):
             left[offset+i] = scramble_left[i]
-        spacer = ' '
-        if puzzle_type == 'sq1':
-            left = sq1.alg_str(left)
-            # Zero-width space: don't show space, but allow line breaks
-            spacer = '&#x200B;'
+        spacer = self.puzzle.html_spacer()
+        left = self.puzzle.alg_list(left)
         # Generate the scramble moves with invisible links on each move.
         # The links trigger a tooltip popup through the linkHovered event.
         # And no, setting this style in the main stylesheet doesn't work...
@@ -1090,20 +1046,13 @@ class ScrambleViewWidget(QFrame):
 
         self.update()
 
-    def set_scramble(self, puzzle_type, scramble):
-        if puzzle_type == '3x3' and scramble:
-            cube = solver.Cube()
-            cube.run_alg(scramble)
-            diag = render.gen_cube_double_diagram(cube)
-        elif puzzle_type == 'sq1':
-            cube = sq1.Square1()
-            cube.run_alg(scramble)
-            diag = sq1.gen_sq1_diagram(cube)
-        elif puzzle_type == 'fto':
-            cube = fto.FTO()
-            cube.run_alg(scramble)
-            diag = fto.gen_fto_diagram(cube)
-        else:
+    def set_scramble(self, puzzle, scramble):
+        diag = None
+        if scramble:
+            diag = puzzle.gen_diagram(scramble)
+        # Meh, this special case is here and not in the PuzzleDefs base class
+        # just so util.py doesn't import render.py
+        if not diag:
             diag = render.gen_cube_double_diagram(None)
 
         self.diagram.load(diag.encode('ascii'))
@@ -1197,6 +1146,7 @@ class SessionWidget(QWidget):
 
         self.scramble_type = ScrambleType.RANDOM_STATE
         self.puzzle_type = '3x3'
+        self.puzzle = None
         self.puzzle_type_label = QLabel('3x3')
         self.scramble_selector = make_dropdown(SCRAMBLE_TYPES,
                 change=self.change_scramble_type)
@@ -1353,6 +1303,7 @@ class SessionWidget(QWidget):
                         t = ScrambleType.HAND_SCRAMBLE
                 self.scramble_selector.setCurrentIndex(t)
             self.puzzle_type = sesh.puzzle_type
+            self.puzzle = PUZZLES[self.puzzle_type]
             self.scramble_type = t
             self.parent.gen_scramble()
 
@@ -1497,7 +1448,7 @@ class SolveEditorDialog(QDialog):
 
         self.solve_id = None
         self.scramble = None
-        self.puzzle_type = None
+        self.puzzle = None
 
     def copy_scramble(self):
         APP.clipboard().setText(self.scramble)
@@ -1526,7 +1477,7 @@ class SolveEditorDialog(QDialog):
         with db.get_session() as session:
             solve = session.query_first(db.Solve, id=solve_id)
             self.scramble = solve.scramble
-            self.puzzle_type = solve.session.puzzle_type
+            self.puzzle = PUZZLES[solve.session.puzzle_type]
 
             self.dnf.setChecked(solve.dnf)
             self.plus_2.setChecked(solve.plus_2)
@@ -1554,7 +1505,7 @@ class SolveEditorDialog(QDialog):
 
     def hover_scramble(self, link):
         if link:
-            self.scramble_popup.set_scramble(self.puzzle_type, self.scramble)
+            self.scramble_popup.set_scramble(self.puzzle, self.scramble)
             text = self.scramble_popup.get_b64_pics(100)
             QToolTip.showText(QCursor.pos(), text)
 

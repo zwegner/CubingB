@@ -19,6 +19,10 @@ import array
 import os
 import random
 
+# Argh fucking circular dependency
+import render
+from util import PuzzleDefs, ScrambleType
+
 ################################################################################
 ## Cube logic ##################################################################
 ################################################################################
@@ -351,48 +355,83 @@ def invert_alg(alg):
         moves.append(m[0] + INV_TURN[m[1:]])
     return ' '.join(moves)
 
-def gen_random_move_scramble(length):
-    scramble = []
-    all_faces = set(range(6))
-    blocked_faces = set()
-    turns = [-1, 1, 2]
-    for i in range(length):
-        face = random.choice(list(all_faces - blocked_faces))
-        # Only allow one turn of each of an opposing pair of faces in a row.
-        # E.g. F B' is allowed, F B' F is not
-        if face ^ 1 not in blocked_faces:
-            blocked_faces = set()
-        blocked_faces.add(face)
+class PuzzleDefs3x3(PuzzleDefs):
+    SCRAMBLE_MOVES_3x3 = 25
+    def supported_scrambles(self):
+        return [ScrambleType.RANDOM_STATE, ScrambleType.RANDOM_MOVES,
+                ScrambleType.ENTER_SCRAMBLE, ScrambleType.HAND_SCRAMBLE]
 
-        turn = random.choice(turns)
-        scramble.append(move_str(face, turn))
-    return scramble
+    def gen_random_state(self):
+        return gen_random_state_scramble()
 
-def gen_big_cube_scramble(puzzle_type):
-    size = (int(puzzle_type[:2]) if len(puzzle_type) > 1 and
-            puzzle_type[1].isdigit() else int(puzzle_type[:1]))
-    length = 20 * (size - 2) # WCA has 60/80/100 moves for 5x5/6x6/7x7
-    scramble = []
-    all_faces = set(range(6))
-    blocked_faces = set()
-    turns = [-1, 1, 2]
-    widths = range(1, size // 2 + 1)
-    for i in range(length):
-        face = random.choice(list(all_faces - blocked_faces))
-        # Only allow one turn of each of an opposing pair of faces in a row.
-        # E.g. F B' is allowed, F B' F is not
-        if face ^ 1 not in blocked_faces:
-            blocked_faces = set()
-        blocked_faces.add(face)
+    def gen_random_moves(self):
+        scramble = []
+        all_faces = set(range(6))
+        blocked_faces = set()
+        turns = [-1, 1, 2]
+        for i in range(self.SCRAMBLE_MOVES_3x3):
+            face = random.choice(list(all_faces - blocked_faces))
+            # Only allow one turn of each of an opposing pair of faces in a row.
+            # E.g. F B' is allowed, F B' F is not
+            if face ^ 1 not in blocked_faces:
+                blocked_faces = set()
+            blocked_faces.add(face)
 
-        turn = random.choice(turns)
-        width = random.choice(widths)
-        scramble.append('%s%s%s%s' % (width if width > 1 else '',
-                FACE_STR[face], 'w' if width > 1 else '', TURN_STR[turn]))
-    return scramble
+            turn = random.choice(turns)
+            scramble.append(move_str(face, turn))
+        return scramble
 
-def validate_scramble(scramble):
-    return all(m in MOVE_FN for m in scramble)
+    def parse_scramble(self, scramble):
+        if all(m in MOVE_FN for m in scramble):
+            return scramble
+        return None
+
+    def gen_diagram(self, scramble):
+        cube = Cube()
+        cube.run_alg(scramble)
+        return render.gen_cube_double_diagram(cube)
+
+class PuzzleDefsBigCube(PuzzleDefs):
+    def __init__(self, size):
+        super().__init__()
+        self.size = size
+
+    def supported_scrambles(self):
+        return [ScrambleType.RANDOM_MOVES, ScrambleType.ENTER_SCRAMBLE,
+                ScrambleType.HAND_SCRAMBLE]
+
+    def gen_random_moves(self):
+        length = 20 * (self.size - 2) # WCA has 60/80/100 moves for 5x5/6x6/7x7
+        scramble = []
+        all_faces = set(range(6))
+        blocked_faces = set()
+        turns = [-1, 1, 2]
+        widths = range(1, self.size // 2 + 1)
+        for i in range(length):
+            face = random.choice(list(all_faces - blocked_faces))
+            # Only allow one turn of each of an opposing pair of faces in a row.
+            # E.g. F B' is allowed, F B' F is not
+            if face ^ 1 not in blocked_faces:
+                blocked_faces = set()
+            blocked_faces.add(face)
+
+            turn = random.choice(turns)
+            width = random.choice(widths)
+            scramble.append('%s%s%s%s' % (width if width > 1 else '',
+                    FACE_STR[face], 'w' if width > 1 else '', TURN_STR[turn]))
+        return scramble
+
+    def parse_scramble(self, scramble):
+        for move in scramble:
+            if move[0].isdigit():
+                if int(move[0]) > self.size // 2:
+                    return None
+                move = move[1:].replace('w', '')
+            if move[0] not in 'UDRLFB':
+                return None
+            if move[1:] not in INV_TURN_STR:
+                return None
+        return scramble
 
 ################################################################################
 ## Actual solver stuff #########################################################

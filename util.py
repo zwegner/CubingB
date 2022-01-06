@@ -16,7 +16,10 @@
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
 import contextlib
+import enum
+import queue
 import time
+import threading
 
 from PyQt5.QtCore import (Qt, QSize)
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
@@ -28,6 +31,10 @@ from PyQt5.QtGui import QIcon
 # Global constants
 
 INF = float('+inf')
+
+ScrambleType = enum.IntEnum('ScrambleType', 'RANDOM_STATE RANDOM_MOVES '
+        'ENTER_SCRAMBLE HAND_SCRAMBLE', start=0)
+SCRAMBLE_TYPES = ['Random state', 'Random Moves', 'Enter scramble', 'Hand Scramble']
 
 STAT_AO_COUNTS = [1, 3, 5, 12, 25, 50, 100, 200, 500, 1000]
 
@@ -84,6 +91,88 @@ def session_sort_key(s):
     if s.sort_id is not None:
         return s.sort_id
     return s.id
+
+# For certain tasks that take a long time, we put them in a queue for a background
+# thread to run
+BACKGROUND_QUEUE = queue.Queue()
+def sched_background_task(fn, *args):
+    BACKGROUND_QUEUE.put((fn, args))
+
+def run_background_thread():
+    while True:
+        [task, args] = BACKGROUND_QUEUE.get()
+        task(*args)
+
+# Base class for handling various scrambling function for each puzzle type
+class PuzzleDefs:
+    def __init__(self):
+        self.is_bg_scramble_gen = False
+        self.cached_state_scramble = None
+        self.cached_moves_scramble = None
+        self.scramble_message = None
+        self.lock = threading.Lock()
+
+    def supported_scrambles(self):
+        return [ScrambleType.ENTER_SCRAMBLE, ScrambleType.HAND_SCRAMBLE]
+
+    def clear_cached_scramble(self):
+        # Might want to only clear the one that was used?
+        self.cached_state_scramble = None
+        self.cached_moves_scramble = None
+
+    def async_gen_scramble(self, callback):
+        with self.lock:
+            if self.is_bg_scramble_gen:
+                return
+            self.is_bg_scramble_gen = True
+
+        scramble = self.gen_random_state()
+
+        with self.lock:
+            self.is_bg_scramble_gen = False
+
+            # Let's hope nothing weird has happened in the meantime
+            if self.cached_state_scramble is None:
+                self.cached_state_scramble = scramble
+
+                callback()
+
+    def random_state_scramble(self, callback):
+        if not self.cached_state_scramble:
+            sched_background_task(self.async_gen_scramble, callback)
+            self.scramble_message = 'Generating scramble...'
+            return None
+        return self.cached_state_scramble
+
+    def gen_random_state(self):
+        raise NotImplementedError()
+
+    def random_move_scramble(self):
+        if not self.cached_moves_scramble:
+            self.cached_moves_scramble = self.gen_random_moves()
+        return self.cached_moves_scramble
+
+    def gen_random_moves(self):
+        raise NotImplementedError()
+
+    # By default just accept a raw string
+    def parse_scramble(self, scramble):
+        return scramble
+
+    # Convert internal scramble representation to list of string moves
+    def alg_list(self, moves):
+        return moves
+
+    def alg_str(self, moves):
+        return ' '.join(moves)
+
+    # How to join scramble moves in the HTML scramble view. Generally just
+    # a space, or a zero-width space to allow breaks
+    def html_spacer(self):
+        return ' '
+
+    def gen_diagram(self, scramble):
+        return None
 
 # Qt helpers
 

@@ -18,6 +18,8 @@
 import math
 import random
 
+from util import PuzzleDefs, ScrambleType
+
 [W, Y, R, O, G, B] = range(6)
 
 PIECES = [(Y, R, B), (Y, B), (Y, B, O), (Y, O), (Y, O, G), (Y, G), (Y, G, R), (Y, R),
@@ -53,6 +55,8 @@ class Square1:
         return True
 
     def run_alg(self, moves):
+        if isinstance(moves, str):
+            moves = parse_alg(moves)
         for [t, b, slice] in moves:
             self.move(t, b, slice=slice)
 
@@ -66,24 +70,67 @@ class Square1:
 
 SOLVED_SQ1 = Square1()
 
-def gen_random_move_scramble(length):
-    moves = []
-    cube = Square1()
-    for i in range(length):
-        tops = [i for i in range(12) if cube.check_top_rot(i)]
-        bottoms = [i for i in range(12) if cube.check_bottom_rot(i)]
-        tb = [(t, b) for t in tops for b in bottoms if (t, b) != (0, 0)]
-        [top, bottom] = random.choice(tb)
-        cube.move(top, bottom)
-        moves.append(((top + 5) % 12 - 5, (bottom + 5) % 12 - 5,
-                True if i < length-1 else bool(random.randrange(2))))
-    return moves
+def parse_alg(moves):
+    try:
+        # Dumb hack alert! For parsing simplicity, add another character after
+        # the slashes that we can split on. This is basically to make parsing the
+        # final move (which might or might not have a slice) easier
+        moves = moves.replace('/', '/`')
+        result = []
+        for move in moves.split('`'):
+            if not move:
+                continue
+            slice = move.endswith('/')
+            move = move.replace('/', '')
+            [t, b] = move.split(',')
+            t = int(t)
+            b = int(b)
+            assert (t or b) and -6 <= t <= 6 and -6 <= b <= 6
+            result.append((t, b, slice))
+        return result
+    except Exception:
+        return None
 
-def alg_str(moves):
-    result = []
-    for [t, b, slice] in moves:
-        result.append('%s,%s%s' % (t, b, '/' if slice else ''))
-    return result
+class PuzzleDefsSq1(PuzzleDefs):
+    SCRAMBLE_MOVES_SQ1 = 15
+    def supported_scrambles(self):
+        return [ScrambleType.RANDOM_MOVES,
+                ScrambleType.ENTER_SCRAMBLE, ScrambleType.HAND_SCRAMBLE]
+
+    def gen_random_moves(self):
+        moves = []
+        cube = Square1()
+        length = self.SCRAMBLE_MOVES_SQ1
+        for i in range(length):
+            tops = [i for i in range(12) if cube.check_top_rot(i)]
+            bottoms = [i for i in range(12) if cube.check_bottom_rot(i)]
+            tb = [(t, b) for t in tops for b in bottoms if (t, b) != (0, 0)]
+            [top, bottom] = random.choice(tb)
+            cube.move(top, bottom)
+            moves.append(((top + 5) % 12 - 5, (bottom + 5) % 12 - 5,
+                    True if i < length-1 else bool(random.randrange(2))))
+        return moves
+
+    def parse_scramble(self, scramble):
+        return parse_alg(scramble)
+
+    def alg_list(self, moves):
+        result = []
+        for [t, b, slice] in moves:
+            result.append('%s,%s%s' % (t, b, '/' if slice else ''))
+        return result
+
+    def alg_str(self, moves):
+        return ''.join(self.alg_list(moves))
+
+    def html_spacer(self):
+        # Zero-width space
+        return '&#x200B;'
+
+    def gen_diagram(self, scramble):
+        cube = Square1()
+        cube.run_alg(scramble)
+        return gen_sq1_diagram(cube)
 
 ################################################################################
 ## SVG rendering stuff #########################################################
