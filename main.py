@@ -31,11 +31,10 @@ import time
 
 from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
         QVariantAnimation, QBuffer, QByteArray, QPoint)
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget,
-        QLabel, QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout,
-        QDialog, QDialogButtonBox, QAbstractItemView, QFrame,
-        QCheckBox, QSlider, QMessageBox, QInputDialog, QMenu,
-        QPlainTextEdit, QToolTip, QScrollArea)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel,
+        QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout, QDialog,
+        QDialogButtonBox, QAbstractItemView, QFrame, QSlider, QMessageBox,
+        QInputDialog, QMenu, QPlainTextEdit, QToolTip, QScrollArea)
 from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
         QRegion, QColor, QPixmap)
 from PyQt5.QtSvg import QSvgWidget
@@ -781,11 +780,9 @@ class SettingsDialog(QDialog):
         with db.get_session() as session:
             settings = session.query_first(db.Settings)
 
-            auto_cal = QCheckBox('Automatically calibrate smart cube gyro '
-                    'when beginning a scramble')
-            auto_cal.setChecked(settings.auto_calibrate)
-            auto_cal.stateChanged.connect(self.set_auto_calibrate)
-
+            auto_cal = make_checkbox('Automatically calibrate smart cube gyro '
+                    'when beginning a scramble', self.set_auto_calibrate,
+                    checked=settings.auto_calibrate)
         make_grid(self, sliders + [
             [reset_button],
             [auto_cal],
@@ -1421,10 +1418,8 @@ class SolveEditorDialog(QDialog):
                 self.notes.toPlainText()))
         self.smart_widget = None
 
-        self.dnf = QCheckBox('DNF')
-        self.dnf.stateChanged.connect(lambda v: self.make_edit('dnf', bool(v)))
-        self.plus_2 = QCheckBox('+2')
-        self.plus_2.stateChanged.connect(lambda v: self.make_edit('plus_2', bool(v)))
+        self.dnf = make_checkbox('DNF', lambda v: self.make_edit('dnf', bool(v)))
+        self.plus_2 = make_checkbox('+2', lambda v: self.make_edit('plus_2', bool(v)))
 
         delete = make_button('Delete', self.delete_solve)
         merge = make_button('Move to session...', self.move_solve)

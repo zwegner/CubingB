@@ -25,7 +25,7 @@ from PyQt5.QtCore import (Qt, QSize)
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
         QTableWidgetItem, QHeaderView, QTabBar, QDialog, QLabel, QComboBox,
         QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView, QAction,
-        QPushButton)
+        QPushButton, QCheckBox)
 from PyQt5.QtGui import QIcon
 
 # Global constants
@@ -192,6 +192,12 @@ def make_button(text, fn, icon=False, size=None, border=True):
             button.setStyleSheet('border: none;')
     button.clicked.connect(fn)
     return button
+
+def make_checkbox(text, changed_fn, checked=True):
+    cb = QCheckBox(text)
+    cb.setChecked(checked)
+    cb.stateChanged.connect(changed_fn)
+    return cb
 
 def cell(text, editable=False, secret_data=None):
     item = QTableWidgetItem(text)

@@ -30,7 +30,7 @@ import time
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtCore import (QSize, Qt)
 from PyQt5.QtWidgets import (QLabel, QDialog, QDialogButtonBox,
-        QWidget, QSizePolicy, QScrollArea, QTableWidget, QCheckBox)
+        QWidget, QSizePolicy, QScrollArea, QTableWidget)
 from PyQt5.QtSvg import QSvgWidget
 
 import db
@@ -631,10 +631,9 @@ class AlgTable(QWidget):
             self.alg_table.setItem(i, 0, a)
             if not self.compact:
                 for [j, attr] in [[1, 'known'], [2, 'ignore']]:
-                    cb = QCheckBox('')
-                    cb.setChecked(bool(getattr(alg, attr)))
-                    cb.stateChanged.connect(
-                            functools.partial(self.change_alg_attr, alg.id, attr))
+                    cb = make_checkbox('',
+                            functools.partial(self.change_alg_attr, alg.id, attr),
+                            checked=bool(getattr(alg, attr)))
                     self.alg_table.setCellWidget(i, j, cb)
 
         self.update()
@@ -1108,9 +1107,7 @@ class GraphDialog(QDialog):
         self.stat_selector = make_dropdown(self.stat_table,
                 change=self.change_stat)
 
-        record_cb = QCheckBox('Only records')
-        record_cb.setChecked(False)
-        record_cb.stateChanged.connect(self.change_record)
+        record_cb = make_checkbox('Only records', self.change_record, checked=False)
 
         self.figure = Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
