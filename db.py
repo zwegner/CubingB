@@ -153,7 +153,8 @@ class Settings(Base, NiceBase):
 
 # Make an object usable outside of a DB session
 def make_transient(obj):
-    return sa.orm.session.make_transient(obj)
+    sa.orm.session.make_transient(obj)
+    return obj
 
 # Subclass of DBSession with some convenience functions
 class NiceSession(DBSession):

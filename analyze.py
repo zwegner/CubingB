@@ -44,7 +44,7 @@ STAT_OUTLIER_PCT = 5
 F2L_SLOTS = ['Front Right', 'Front Left', 'Back Left', 'Back Right']
 
 TrainMode = enum.IntEnum('TrainMode', 'RECOGNIZE DRILL', start=0)
-AlgSet = enum.IntEnum('AlgSet', 'F2L OLL PLL', start=0)
+AlgSet = enum.IntEnum('AlgSet', 'PLL OLL F2L AF2L', start=0)
 
 # Normal cube colors to autodetect in session names. White is intentionally
 # left out since the graphs are on white backgrounds
@@ -531,11 +531,12 @@ class SmartSolve:
 # Show a diagram and a label for a certain alg case. This is just a widget
 # subclass so we can handle mouse clicks (there's no clicked signal in QWidget?!)
 class CaseCard(QWidget):
-    def __init__(self, parent, case):
+    def __init__(self, parent, case, algs=None):
         super().__init__(parent)
         self.parent = parent
         self.case_id = case.id
         self.is_f2l = ('F2L' in case.alg_set)
+        self.algs = algs
 
         # Generate diagram
         diag = render.gen_cube_diagram(case.diagram, type=case.diag_type)
@@ -547,22 +548,45 @@ class CaseCard(QWidget):
         label.setStyleSheet('font: 14px; font-weight: bold;')
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        make_vbox(self, [svg, label])
+        left = QWidget()
+        make_vbox(left, [svg, label])
+
+        # Show an alg table if requested
+        items = [left]
+        if algs:
+            self.table = AlgTable(self, algs=algs)#, compact=True)
+            self.table.select_case(self.case_id, self.is_f2l)
+            items.append(self.table)
+        else:
+            self.table = None
+
+        make_hbox(self, items)
 
     def mouseReleaseEvent(self, event):
         self.parent.select_case(self.case_id, self.is_f2l)
 
 class AlgTable(QWidget):
-    def __init__(self, parent):
+    def __init__(self, parent, algs=None, compact=False):
         super().__init__(parent)
         self.case_id = None
         self.f2l_slot = None
+        self.algs = algs
+        self.compact = compact
 
         self.f2l_tabs = make_tabs(*F2L_SLOTS, change=self.change_f2l_tab)
 
         self.alg_table = QTableWidget()
-        set_table_columns(self.alg_table, ['Alg', 'Known?', 'Ignore'], stretch=0)
-        self.alg_table.setStyleSheet('font: 20px;')
+        if compact:
+            set_table_columns(self.alg_table, [''], visible=False, stretch=0)
+        else:
+            set_table_columns(self.alg_table, ['Alg', 'Known', 'Ignore'], stretch=0)
+        self.alg_table.verticalHeader().hide()
+        self.alg_table.setStyleSheet('QTableWidget { font: 12px; }'
+                'QHeaderView::section { font: 10px; }')
+
+        # Not totally sure why this is necessary, but stylesheets weren't cutting it
+        self.alg_table.horizontalHeader().resizeSection(1, 40)
+        self.alg_table.horizontalHeader().resizeSection(2, 40)
 
         make_vbox(self, [self.f2l_tabs, self.alg_table], margin=0)
 
@@ -590,15 +614,22 @@ class AlgTable(QWidget):
             return
         self.f2l_tabs.setVisible(self.is_f2l)
 
-        with db.get_session() as session:
-            case = session.query_first(db.AlgCase, id=self.case_id)
+        if self.algs:
+            algs = self.algs
+        else:
+            with db.get_session() as session:
+                case = session.query_first(db.AlgCase, id=self.case_id)
+                algs = [db.make_transient(alg) for alg in case.algs]
 
-            algs = [alg for alg in case.algs if alg.f2l_slot == self.f2l_slot]
+        algs = [alg for alg in algs if alg.f2l_slot == self.f2l_slot]
 
-            self.alg_table.clearContents()
-            self.alg_table.setRowCount(len(algs))
-            for [i, alg] in enumerate(algs):
-                self.alg_table.setItem(i, 0, cell(alg.moves))
+        self.alg_table.clearContents()
+        self.alg_table.setRowCount(len(algs))
+        for [i, alg] in enumerate(algs):
+            a = cell(alg.moves)
+            a.setToolTip(alg.moves)
+            self.alg_table.setItem(i, 0, a)
+            if not self.compact:
                 for [j, attr] in [[1, 'known'], [2, 'ignore']]:
                     cb = QCheckBox('')
                     cb.setChecked(bool(getattr(alg, attr)))
@@ -618,40 +649,28 @@ class AlgViewer(QWidget):
             return
         self.initialized = True
 
-        # Build cards for each case
-        all_algs = collections.defaultdict(list)
-        with db.get_session() as session:
-            for case in session.query_all(db.AlgCase):
-                all_algs[case.alg_set].append(CaseCard(self, case))
+        self.alg_set = AlgSet.PLL
+        self.alg_set_init = collections.defaultdict(bool)
 
-        # For each alg set, create a title label and a flow layout with all
-        # its cases
-        set_widgets = []
-        for [alg_set, algs] in all_algs.items():
-            title = QLabel(alg_set)
-            title.setStyleSheet('font: 18px; font-weight: bold;')
-            set_widgets.append(title)
+        self.alg_set_tabs = make_tabs(*AlgSet.__members__,
+                change=self.change_alg_set)
 
-            widget = QWidget()
-            layout = flow_layout.FlowLayout(widget)
-            for s in algs:
-                layout.addWidget(s)
-            set_widgets.append(widget)
+        # For each alg set, create an empty scroll area that we'll lazily fill
+        # in with algs as the tabs are clicked
+        self.alg_set_tables = {}
+        alg_tables = []
+        for alg_set in AlgSet:
+            scroll_area = QScrollArea(self)
+            scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Make main scrollable alg view
-        contents = QWidget()
-        make_vbox(contents, set_widgets)
-        scroll_area = QScrollArea(self)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setWidget(contents)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        title = QLabel('All Algs')
-        title.setStyleSheet('font: 24px; font-weight: bold;')
+            scroll_area.hide()
+            self.alg_set_tables[alg_set] = scroll_area
+            alg_tables.append(scroll_area)
 
         self.main_view = QWidget()
-        make_vbox(self.main_view, [title, scroll_area])
+        make_vbox(self.main_view, alg_tables)
 
         # Make alg detail view, right side
         self.alg_table = AlgTable(self)
@@ -672,7 +691,16 @@ class AlgViewer(QWidget):
         make_hbox(self.alg_detail, [left, self.alg_table])
         self.alg_detail.hide()
 
-        make_vbox(self, [self.main_view, self.alg_detail], margin=0)
+        make_vbox(self, [self.alg_set_tabs, self.main_view,
+                self.alg_detail], margin=0)
+
+        self.render()
+
+    def change_alg_set(self, tab):
+        alg_set = AlgSet(tab)
+        if alg_set != self.alg_set:
+            self.alg_set = alg_set
+            self.render()
 
     def select_case(self, case_id, is_f2l):
         # Just forward message to the alg table and rerender
@@ -683,6 +711,31 @@ class AlgViewer(QWidget):
         selected = (self.alg_table.case_id is not None)
         self.main_view.setVisible(not selected)
         self.alg_detail.setVisible(selected)
+
+        for alg_set in AlgSet:
+            self.alg_set_tables[alg_set].setVisible(self.alg_set == alg_set)
+
+        # Lazy load the current tab's algs for snappier startup
+        if not self.alg_set_init[self.alg_set]:
+            self.alg_set_init[self.alg_set] = True
+
+            # Build cards for each case
+            alg_cards = []
+            with db.get_session() as session:
+                query = (session.query(db.AlgCase)
+                        .filter_by(alg_set=self.alg_set.name)
+                        .options(db.sa.orm.joinedload(db.AlgCase.algs)))
+                for case in query:
+                    db.make_transient(case)
+                    algs = [db.make_transient(alg) for alg in case.algs]
+                    alg_cards.append(CaseCard(self, case, algs=algs))
+
+            # For this alg set, create a flow layout with all its cases
+            contents = QWidget()
+            layout = flow_layout.FlowLayout(contents)
+            for s in alg_cards:
+                layout.addWidget(s)
+            self.alg_set_tables[self.alg_set].setWidget(contents)
 
         if selected:
             with db.get_session() as session:
