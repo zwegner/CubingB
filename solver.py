@@ -355,6 +355,16 @@ def invert_alg(alg):
         moves.append(m[0] + INV_TURN[m[1:]])
     return ' '.join(moves)
 
+def move_qtm(move):
+    if not move:
+        return 0
+    if move[0] in 'xyz':
+        return 0
+    qtm = {'': 1, "'": 1, '2': 2, "2'": 2}[move[1:]]
+    if move[0] in 'EMS':
+        qtm <<= 1
+    return qtm
+
 class PuzzleDefs3x3(PuzzleDefs):
     SCRAMBLE_MOVES_3x3 = 25
     def supported_scrambles(self):

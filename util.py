@@ -25,7 +25,7 @@ from PyQt5.QtCore import (Qt, QSize)
 from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
         QTableWidgetItem, QHeaderView, QTabBar, QDialog, QLabel, QComboBox,
         QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView, QAction,
-        QPushButton, QCheckBox)
+        QPushButton, QCheckBox, QSizePolicy)
 from PyQt5.QtGui import QIcon
 
 # Global constants
@@ -91,6 +91,11 @@ def session_sort_key(s):
     if s.sort_id is not None:
         return s.sort_id
     return s.id
+
+# Just a basic container class for keeping some attrs together
+class DummyObj:
+    def __init__(self, **kwargs):
+        self.__dict__.update(**kwargs)
 
 # For certain tasks that take a long time, we put them in a queue for a background
 # thread to run
@@ -244,6 +249,12 @@ def make_grid(parent, table, stretch=None, widths=None, margin=None):
         for [i, w] in enumerate(widths):
             layout.setColumnMinimumWidth(i, w)
     return layout
+
+# Qt has a QSpacerItem but that isn't a normal widget so meh
+class Spacer(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
 def make_tabs(*tabs, change=None):
     tab_bar = QTabBar()

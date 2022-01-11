@@ -338,7 +338,7 @@ class CubeWindow(QMainWindow):
     def keyReleaseEvent(self, event):
         if event.key() == Qt.Key.Key_Space:
             if self.mode == Mode.ALG_TRAIN:
-                self.alg_trainer_widget.reset()
+                self.alg_trainer_widget.abort()
             elif self.state == State.SOLVE_PENDING:
                 if time.time() - self.pending_start > TIMER_DEBOUNCE:
                     self.state = State.SOLVING
