@@ -1341,11 +1341,10 @@ class GraphDialog(QDialog):
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
         from matplotlib.figure import Figure
 
-        select_label = QLabel('Graph Type:')
-        self.selector = make_dropdown(GRAPH_TYPES, change=self.change_type)
-
         session_button = make_button('Select sessions...', self.change_sessions)
         self.session_selector = SessionSelectorDialog(self)
+
+        record_cb = make_checkbox('Only records', self.change_record, checked=False)
 
         stat_label = QLabel('Stat:')
         # Build a dropdown and lookup tables for stats
@@ -1355,7 +1354,16 @@ class GraphDialog(QDialog):
         self.stat_selector = make_dropdown(self.stat_table,
                 change=self.change_stat)
 
-        record_cb = make_checkbox('Only records', self.change_record, checked=False)
+        self.type_label = QLabel('Graph Type:')
+        self.type_selector = make_dropdown(GRAPH_TYPES, change=self.change_type)
+
+        self.cutoff_label = QLabel('Day cutoff')
+        hours = [12] + list(range(1, 12))
+        ampm_hours = ['%s%s' % (h, ampm) for ampm in ['am', 'pm'] for h in hours]
+        self.cutoff_selector = make_dropdown(ampm_hours,
+                change=self.change_cutoff)
+        self.cutoff_label.hide()
+        self.cutoff_selector.hide()
 
         self.figure = Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
@@ -1370,6 +1378,7 @@ class GraphDialog(QDialog):
 
         self.type = 'adaptive'
         self.stat = 'ao100'
+        self.cutoff = 0
 
         self.plot = None
         self.line = None
@@ -1386,7 +1395,8 @@ class GraphDialog(QDialog):
 
         make_grid(self, [
             [session_button, None, record_cb, None, stat_label, self.stat_selector,
-                    None, select_label, self.selector],
+                    None, self.type_label, self.type_selector, self.cutoff_label,
+                    self.cutoff_selector],
             [self.canvas],
             [buttons],
         ], stretch=[0, 1, 0, 1, 0, 0, 1, 0, 0])
@@ -1402,8 +1412,12 @@ class GraphDialog(QDialog):
         self.render(keep_ranges=not was_count ^ is_count)
 
     def change_type(self):
-        self.type = GRAPH_TYPES[self.selector.currentIndex()]
+        self.type = GRAPH_TYPES[self.type_selector.currentIndex()]
         self.render()
+
+    def change_cutoff(self):
+        self.cutoff = self.cutoff_selector.currentIndex()
+        self.render(keep_ranges=True)
 
     def change_sessions(self):
         # Update session selector with all sessions
@@ -1532,6 +1546,12 @@ class GraphDialog(QDialog):
     def render(self, keep_ranges=False):
         self.init()
 
+        is_count = self.stat == 'count'
+        self.type_label.setVisible(not is_count)
+        self.type_selector.setVisible(not is_count)
+        self.cutoff_label.setVisible(is_count)
+        self.cutoff_selector.setVisible(is_count)
+
         limit_x = None
         limit_y = None
         if keep_ranges and self.plot:
@@ -1576,13 +1596,15 @@ class GraphDialog(QDialog):
                     return color
 
         # Handle 'solves per day' metric
-        if self.stat == 'count':
+        if is_count:
             # Count all solves based on the day
             dates = {}
             counts = {}
             all_dates = set()
+            # Get a delta to add to each time based on the cutoff
+            delta = datetime.timedelta(hours=-self.cutoff)
             for [name, solves] in self.solve_sets:
-                dates[name] = [d.date() for [i, d, s] in solves]
+                dates[name] = [(d + delta).date() for [i, d, s] in solves]
                 counts[name] = collections.Counter(dates[name])
                 all_dates.update(counts[name].keys())
 

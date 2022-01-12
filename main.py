@@ -1750,6 +1750,8 @@ class SessionEditorDialog(QDialog):
         self.ctx_menu = QMenu(self)
         add_menu_action(self.ctx_menu, 'View top solves',
                 functools.partial(self.view_top_selection))
+        add_menu_action(self.ctx_menu, 'Graph solves per day',
+                functools.partial(self.graph_selection, 'count'))
         for [s, stat] in STAT_AO_COUNTS_STR:
             add_menu_action(self.ctx_menu, 'Graph %s' % stat,
                     functools.partial(self.graph_selection, s))
