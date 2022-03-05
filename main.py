@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with CubingB.  If not, see <https://www.gnu.org/licenses/>.
 
+import collections
 import cProfile
 import enum
 import functools
@@ -57,11 +58,13 @@ Mode = enum.IntEnum('Mode', 'TIMER PLAYBACK ALG_TRAIN ALG_VIEW', start=0)
 State = enum.Enum('State', 'SCRAMBLE SOLVE_PENDING SOLVING SMART_SCRAMBLING '
         'SMART_SCRAMBLED SMART_SOLVING')
 
-PUZZLES = {
+default_defs = PuzzleDefs()
+PUZZLES = collections.defaultdict(lambda: default_defs)
+PUZZLES.update({
     '3x3': solver.PuzzleDefs3x3(),
     'sq1': sq1.PuzzleDefsSq1(),
     'fto': fto.PuzzleDefsFTO(),
-}
+})
 # Add big cube scrambles. Do people ever do machine-generated scrambles on 10x10+?
 for i in range(4, 10):
     PUZZLES['%sx%s' % (i, i)] = solver.PuzzleDefsBigCube(i)
