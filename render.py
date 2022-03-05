@@ -17,7 +17,8 @@
 
 from OpenGL.GL import *
 from OpenGL.GLU import *
-from PyQt5.QtWidgets import QOpenGLWidget, QSizePolicy
+from PySide6.QtWidgets import QSizePolicy
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 import solver
 

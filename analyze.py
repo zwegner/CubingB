@@ -27,11 +27,11 @@ import re
 import struct
 import time
 
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtCore import (QSize, Qt)
-from PyQt5.QtWidgets import (QLabel, QDialog, QDialogButtonBox,
+from PySide6.QtCore import Signal
+from PySide6.QtCore import (QSize, Qt)
+from PySide6.QtWidgets import (QLabel, QDialog, QDialogButtonBox,
         QWidget, QSizePolicy, QScrollArea, QTableWidget, QFrame)
-from PyQt5.QtSvg import QSvgWidget
+from PySide6.QtSvgWidgets import QSvgWidget
 
 import db
 import flow_layout
@@ -830,7 +830,7 @@ PRE_POST_AUFS.sort(key=lambda pp: solver.move_qtm(pp[0]) + solver.move_qtm(pp[1]
 
 class AlgTrainer(QWidget):
     # Signal to async call on main thread (like in main.py)
-    schedule_fn = pyqtSignal([object])
+    schedule_fn = Signal([object])
 
     def __init__(self, parent):
         super().__init__(parent)

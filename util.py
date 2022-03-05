@@ -21,12 +21,12 @@ import queue
 import time
 import threading
 
-from PyQt5.QtCore import (Qt, QSize)
-from PyQt5.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
+from PySide6.QtCore import (Qt, QSize)
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QGridLayout,
         QTableWidgetItem, QHeaderView, QTabBar, QDialog, QLabel, QComboBox,
-        QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView, QAction,
-        QPushButton, QCheckBox, QSizePolicy)
-from PyQt5.QtGui import QIcon
+        QTableWidget, QDialogButtonBox, QWidget, QAbstractItemView,
+        QPushButton, QCheckBox, QSizePolicy, QInputDialog)
+from PySide6.QtGui import QIcon, QAction
 
 # Global constants
 

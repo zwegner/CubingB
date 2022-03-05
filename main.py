@@ -29,15 +29,15 @@ import sys
 import threading
 import time
 
-from PyQt5.QtCore import (QSize, Qt, QTimer, pyqtSignal, QAbstractAnimation,
+from PySide6.QtCore import (QSize, Qt, QTimer, Signal, QAbstractAnimation,
         QVariantAnimation, QBuffer, QByteArray, QPoint)
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel,
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel,
         QTableWidget, QTableWidgetItem, QSizePolicy, QGridLayout, QDialog,
         QDialogButtonBox, QAbstractItemView, QFrame, QSlider, QMessageBox,
         QInputDialog, QMenu, QPlainTextEdit, QToolTip, QScrollArea)
-from PyQt5.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
+from PySide6.QtGui import (QIcon, QFont, QFontDatabase, QCursor, QPainter, QImage,
         QRegion, QColor, QPixmap)
-from PyQt5.QtSvg import QSvgWidget
+from PySide6.QtSvgWidgets import QSvgWidget
 
 import analyze
 import bluetooth
@@ -109,14 +109,14 @@ def show_merge_dialog(session, session_selector, msg, query, exclude_session=Non
 class CubeWindow(QMainWindow):
     # Signal to just run a specified function in a Qt thread, since Qt really
     # cares deeply which thread you're using when starting timers etc.
-    schedule_fn = pyqtSignal([object])
-    schedule_fn_args = pyqtSignal([object, object])
+    schedule_fn = Signal([object])
+    schedule_fn_args = Signal([object, object])
 
-    playback_events = pyqtSignal([list])
+    playback_events = Signal([list])
 
-    bt_scan_result = pyqtSignal([str, object])
-    bt_status_update = pyqtSignal([object])
-    bt_connected = pyqtSignal([object])
+    bt_scan_result = Signal([str, object])
+    bt_status_update = Signal([object])
+    bt_connected = Signal([object])
 
     def __init__(self):
         super().__init__()
@@ -1084,7 +1084,7 @@ class ScrambleViewWidget(QFrame):
 # fine-grained logic here, and still only generate the next chunk of rows, but this
 # is good enough for now
 class LazyTable(QTableWidget):
-    delay_scroll = pyqtSignal([int])
+    delay_scroll = Signal([int])
     def __init__(self, resize_trigger):
         super().__init__()
         self.resize_trigger = resize_trigger
@@ -2050,6 +2050,6 @@ if __name__ == '__main__':
     window.show()
     # Profile mode
     if '-p' in sys.argv:
-        cProfile.run('APP.exec_()', sort=pstats.SortKey.CUMULATIVE)
+        cProfile.run('APP.exec()', sort=pstats.SortKey.CUMULATIVE)
     else:
-        sys.exit(APP.exec_())
+        sys.exit(APP.exec())

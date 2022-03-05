@@ -1,6 +1,6 @@
 pyobjc
 PyOpenGL
-PyQt5
+PySide6
 sqlalchemy
 alembic
 matplotlib
