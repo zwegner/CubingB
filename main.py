@@ -1127,6 +1127,7 @@ class SessionWidget(QWidget):
         edit = make_button('material/edit_note_black_24dp.svg', self.edit_sessions,
                 icon=True, size=20)
 
+        self.stat_table = None
         self.stats = QWidget()
 
         self.ctx_menu = QMenu(self)
@@ -1309,6 +1310,18 @@ class SessionWidget(QWidget):
             self.table.clearContents()
             self.table.setRowCount(0)
 
+            # XXX Work around annoying bug: removing the self.stats widget and
+            # replacing it with another was not clearing the previously
+            # painted contents, so go through all the child elements of the
+            # table that's about to be removed and clear the text. Ugh.
+            # Is the widget still there? Is this a memory leak?
+            if self.stat_table:
+                for row in self.stat_table:
+                    for item in row:
+                        if item:
+                            item.setText('')
+                self.stat_table = None
+
             # Clear the stats
             self.layout.removeWidget(self.stats)
             self.stats = QWidget()
@@ -1358,6 +1371,7 @@ class SessionWidget(QWidget):
                     stat_table.append([QLabel(stat), mean, best, graph_button])
 
                 make_grid(self.stats, stat_table, stretch=[1, 1, 1, 0])
+                self.stat_table = stat_table
 
                 # Check if this solve broke a record
                 if notify:
