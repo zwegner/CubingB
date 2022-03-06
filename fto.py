@@ -141,6 +141,9 @@ T_TRI_ROT = [23, 21, 22, 19, 20, 18, 15, 16, 17, 13, 14, 12, 3, 4, 5, 2, 0, 1,
         10, 11, 9, 8, 6, 7]
 Y2_TURN = [B, F, D, U, R, BL, L, BR]
 Y2_TRI_ROT = [Y2_TURN[i] * 3 + j for i in range(8) for j in range(3)]
+U_TURN = [U, D, BR, L, F, B, BL, R]
+U_TRI_ROT = [2, 0, 1, 4, 5, 3, 18, 19, 20, 21, 22, 23, 8, 6, 7, 9, 10, 11, 13, 14, 12, 15, 16, 17]
+
 def gen_turns():
     def add_move(s, fn, face_1=None, face_2=None):
         MOVE_FN[s] = fn
@@ -192,17 +195,17 @@ def gen_turns():
             move = move_str(face, turn)
             add_move(move_str(face, turn), fn, face_1=(face, turn))
 
-    for [n, t, r] in [['T', T_TURN, T_TRI_ROT], ['y2', Y2_TURN, Y2_TRI_ROT]]:
+    for [n, t, r] in [['T', T_TURN, T_TRI_ROT], ['y2', Y2_TURN, Y2_TRI_ROT],
+            ['Uo', U_TURN, U_TRI_ROT]]:
         corners = [tuple(t[c] for c in corner) for corner in CORNERS]
         edges = [tuple(t[c] for c in edge) for edge in EDGES]
         triangles = [r[t] for t in MARKED_TRIANGLES]
         fto = FTO(corners=corners, edges=edges, triangles=triangles)
 
         MOVE_FN[n] = build_transform_fn('t', fto)
+        MOVE_FN[n + "'"] = build_transform_fn('t', SOLVED_MARKED_FTO, fto)
 
     fto = SOLVED_MARKED_FTO.copy()
-    fto.move('T').move('T').move('T')
-    MOVE_FN["T'"] = build_transform_fn('t_prime', fto)
 
 gen_turns()
 
